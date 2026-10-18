@@ -125,3 +125,21 @@ test('Permanent failures require manual retry and acknowledgement removes the ac
  const q=new ResearchQueue();q.enqueue('First');q.enqueue('Second');const first=q.current;q.fail(first,false);const second=q.current;
  assert.equal(second.text,'Second');assert.equal(q.retryDelay,null);q.retryFailed();q.acknowledge(second);assert.equal(q.items[0],first);assert.equal(first.failures,0);
 });
+
+test('Microphone constraints use explicit selection and optional automatic gain',async()=>{
+ const b=await browser();b.get('auto-gain').checked=true;b.get('mic-device').value='external-mic';
+ assert.equal(vm.runInContext('audioConstraints().deviceId.exact',b.context),'external-mic');assert.equal(vm.runInContext('audioConstraints().autoGainControl',b.context),true);
+ b.get('auto-gain').checked=false;b.get('mic-device').value='';assert.equal(vm.runInContext('audioConstraints().deviceId',b.context),undefined);assert.equal(vm.runInContext('audioConstraints().autoGainControl',b.context),false);
+});
+test('Input meter distinguishes silence, usable level and clipping, then resets on cleanup',async()=>{
+ const b=await browser();
+ vm.runInContext('updateInputLevel(new Int16Array(2048).buffer)',b.context);assert.match(b.get('mic-level-label').textContent,/Quiet/);assert.equal(b.get('mic-level').value,0);
+ vm.runInContext('updateInputLevel(new Int16Array(2048).fill(4000).buffer)',b.context);assert.equal(b.get('mic-level-label').textContent,'Input level OK');
+ vm.runInContext('updateInputLevel(new Int16Array(2048).fill(32767).buffer)',b.context);assert.match(b.get('mic-level-label').textContent,/Too loud/);
+ vm.runInContext('cleanupAudio()',b.context);assert.equal(b.get('mic-level').value,0);
+});
+test('Device refresh preserves a selected microphone and falls back when removed',async()=>{
+ const b=await browser();b.context.navigator={mediaDevices:{enumerateDevices:async()=>[{kind:'audioinput',deviceId:'usb',label:'USB microphone'}]}};
+ b.get('mic-device').value='usb';await vm.runInContext('refreshMicrophones()',b.context);assert.equal(b.get('mic-device').value,'usb');
+ b.context.navigator.mediaDevices.enumerateDevices=async()=>[];await vm.runInContext('refreshMicrophones()',b.context);assert.equal(b.get('mic-device').value,'');
+});

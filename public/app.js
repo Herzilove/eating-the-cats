@@ -20,6 +20,7 @@ function updateSession(){
  const totals={};for(const section of queue.sections){totals[section.status]=(totals[section.status]||0)+1;const row=document.createElement('details');const summary=document.createElement('summary');summary.textContent='#'+section.id+' · '+label(section.status)+(section.duplicate?' (see #'+section.duplicate+')':'')+' · '+(section.speaker||'Unknown')+' · '+new Date(section.createdAt).toLocaleTimeString();const p=document.createElement('p');p.textContent=section.selectedClaims?section.selectedClaims.join(' • '):section.text;row.append(summary,p);$('coverage').append(row);}
  $('coverage-count').textContent=Object.entries(totals).map(([status,n])=>n+' '+label(status)).join(' · ')||'No sections yet';
  $('duration').disabled=recording||stopping;
+ $('mic-device').disabled=recording||stopping;$('auto-gain').disabled=recording||stopping;
  $('speaker').disabled=recording||stopping;
  document.querySelectorAll('[data-speaker]').forEach(b=>b.disabled=recording||stopping);
  $('restore').disabled=busy||recording||stopping;
@@ -138,7 +139,7 @@ function showTranscript(partial=''){
 }
 $('transcript-expander').ontoggle=()=>{if($('transcript-expander').open)showTranscript(partialSpeech);};
 async function startupStep(promise,milliseconds,error){let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(error)),milliseconds);})]);}finally{clearTimeout(timer);}}
-function cleanupAudio(){stream?.getTracks().forEach(t=>t.stop());stream=null;sourceNode?.disconnect();pcmNode?.disconnect();muteNode?.disconnect();if(audioContext&&audioContext.state!=='closed')audioContext.close().catch(()=>{});audioContext=null;}
+function cleanupAudio(){ $('mic-level').value=0;$('mic-level-label').textContent='Microphone idle';stream?.getTracks().forEach(t=>t.stop());stream=null;sourceNode?.disconnect();pcmNode?.disconnect();muteNode?.disconnect();if(audioContext&&audioContext.state!=='closed')audioContext.close().catch(()=>{});audioContext=null;}
 function stop(){
  if(recordingStarted){recordedMs+=Date.now()-recordingStarted;recordingStarted=0;}recording=false;stopping=true;clearTimeout(reconnectTimer);clearTimeout(stopTimer);cleanupAudio();const old=socket;socket=null;
  if(old?.readyState===WebSocket.OPEN){
@@ -158,10 +159,14 @@ async function startLive(){
  try{
   const Context=window.AudioContext||window.webkitAudioContext;if(!Context||!navigator.mediaDevices?.getUserMedia)throw Error('Live recording requires HTTPS and a supported browser.');
   message('Allow microphone access in your browser. Waiting for permission…');
-  const microphone=navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,channelCount:1}});
+  const microphone=navigator.mediaDevices.getUserMedia({audio:audioConstraints()});
   microphone.then(media=>{if(!recording||id!==sessionId)media.getTracks().forEach(track=>track.stop());},()=>{});
   const localStream=await startupStep(microphone,25000,'Microphone permission did not arrive. Allow microphone access in the browser site settings. If you are in an embedded browser, open this page in Chrome or Edge.');
   if(!recording||id!==sessionId){localStream.getTracks().forEach(t=>t.stop());return;}stream=localStream;
+  const track=stream.getAudioTracks?.()[0];const settings=track?.getSettings?.()||{};
+  $('audio-settings-status').textContent='Automatic volume: '+(settings.autoGainControl===true?'active':settings.autoGainControl===false?'off':'not reported by this browser')+'. Noise suppression: '+(settings.noiseSuppression===true?'active':'not confirmed')+'.';
+  refreshMicrophones();
+  if(track)track.onended=()=>{if(recording&&id===sessionId){message('Microphone disconnected. Select an available input and restart listening.');stop();}};
   message('Starting microphone audio…');
   const context=new Context({sampleRate:16000});audioContext=context;
   await startupStep(context.resume(),8000,'This browser did not enable audio capture. Open the app in Chrome or Edge and allow the microphone.');
@@ -172,11 +177,11 @@ async function startLive(){
   const rate=audioContext.sampleRate;audioRate=rate;const url=new URL('wss://api.elevenlabs.io/v1/speech-to-text/realtime');url.search=new URLSearchParams({model_id:'scribe_v2_realtime',token,audio_format:`pcm_${rate}`,commit_strategy:'vad',vad_silence_threshold_secs:'0.7'});
   const ws=new WebSocket(url);socket=ws;lastCommitAt=Date.now();partialSpeech='';showTranscript();
   const connectionTimer=setTimeout(()=>{if(ws.readyState===WebSocket.CONNECTING){message('Live connection timed out. Please retry.');stop();}},15000);
-  ws.onopen=()=>{clearTimeout(connectionTimer);if(!recording||id!==sessionId){ws.close();return;}sourceNode=audioContext.createMediaStreamSource(stream);pcmNode=new AudioWorkletNode(audioContext,'pcm-stream');muteNode=audioContext.createGain();muteNode.gain.value=0;sourceNode.connect(pcmNode);pcmNode.connect(muteNode);muteNode.connect(audioContext.destination);pcmNode.port.onmessage=event=>{if(ws.readyState!==WebSocket.OPEN||!recording)return;if(ws.bufferedAmount>256000){message('Audio connection is too slow. Please retry.');stop();return;}const bytes=new Uint8Array(event.data);let binary='';for(const byte of bytes)binary+=String.fromCharCode(byte);const commit=shouldCommitSpeech();if(commit)lastCommitAt=Date.now();ws.send(JSON.stringify({message_type:'input_audio_chunk',audio_base_64:btoa(binary),sample_rate:rate,...(commit?{commit:true}:{})}));};recordingStarted=Date.now();$('live').textContent='LIVE';message('Listening continuously. Statements are queued for checking while you speak.');stopTimer=setTimeout(stop,Math.max(1,Number($('duration').value)*60000-recordedMs));};
+  ws.onopen=()=>{clearTimeout(connectionTimer);if(!recording||id!==sessionId){ws.close();return;}sourceNode=audioContext.createMediaStreamSource(stream);pcmNode=new AudioWorkletNode(audioContext,'pcm-stream');muteNode=audioContext.createGain();muteNode.gain.value=0;sourceNode.connect(pcmNode);pcmNode.connect(muteNode);muteNode.connect(audioContext.destination);pcmNode.port.onmessage=event=>{if(ws.readyState!==WebSocket.OPEN||!recording)return;if(ws.bufferedAmount>256000){message('Audio connection is too slow. Please retry.');stop();return;}updateInputLevel(event.data);const bytes=new Uint8Array(event.data);let binary='';for(const byte of bytes)binary+=String.fromCharCode(byte);const commit=shouldCommitSpeech();if(commit)lastCommitAt=Date.now();ws.send(JSON.stringify({message_type:'input_audio_chunk',audio_base_64:btoa(binary),sample_rate:rate,...(commit?{commit:true}:{})}));};recordingStarted=Date.now();$('live').textContent='LIVE';message('Listening continuously. Statements are queued for checking while you speak.');stopTimer=setTimeout(stop,Math.max(1,Number($('duration').value)*60000-recordedMs));};
   ws.onmessage=event=>{if(id!==sessionId)return;let data;try{data=JSON.parse(event.data);}catch{return;}if(data.message_type==='partial_transcript'){partialSpeech=data.text||'';showTranscript(partialSpeech);}else if(data.message_type==='committed_transcript'){lastCommitAt=Date.now();partialSpeech='';const text=(data.text||'').trim();if(text){if(!pendingText.trim())pendingSince=Date.now();committedText=[committedText,text].filter(Boolean).join(' ');pendingText=[pendingText,text].filter(Boolean).join(' ');persist();showTranscript();scheduleResearch();}}else if(/error|exceeded|rate_limited|throttled|unaccepted|overflow|exhausted/.test(data.message_type||'')){message(`ElevenLabs: ${data.error||data.message_type}. Check Speech to Text access and credits.`);stop();}};
   ws.onerror=()=>{if(id===sessionId){message('ElevenLabs live connection failed. Check Speech to Text permissions and credits.');stop();}};
   ws.onclose=()=>{clearTimeout(connectionTimer);if(id===sessionId&&recording){gaps.push(new Date().toISOString());message('Connection lost. A gap was recorded. Press Start listening to resume.');stop();reconnect();}};
- }catch(error){if(id===sessionId){const errors={NotAllowedError:'Microphone access was blocked. Allow the microphone in your browser site settings, then try again.',NotFoundError:'No microphone was found. Connect or enable a microphone and try again.',NotReadableError:'The microphone is unavailable or being used by another app. Close the other recording app and retry.'};message(errors[error.name]||error.message||'Could not start microphone.');stop();}}
+ }catch(error){if(id===sessionId){const errors={NotAllowedError:'Microphone access was blocked. Allow the microphone in your browser site settings, then try again.',NotFoundError:'No microphone was found. Connect or enable a microphone and try again.',OverconstrainedError:'The selected microphone is unavailable. Choose another input or System default microphone.',NotReadableError:'The microphone is unavailable or being used by another app. Close the other recording app and retry.'};message(errors[error.name]||error.message||'Could not start microphone.');stop();}}
 }
 $('mic').onclick=()=>{if(recording)stop();else startLive();};
 fetch('/api/status').then(r=>r.json()).then(s=>{for(const [key,label] of [['nebius','Token Factory'],['tavily','Tavily'],['elevenlabs','ElevenLabs']]){const span=document.createElement('span');span.textContent=`${s[key]?'●':'○'} ${label}: ${s[key]?'configured':'missing'}`;$('services').append(span);}if($('message').textContent==='Checking service configuration…')message('');}).catch(()=>message('Could not read service configuration.'));
@@ -229,3 +234,27 @@ setInterval(()=>{
 
 $('new-results').onclick=flushCards;
 $('verdict-filter').onchange=()=>{flushCards();applyFilter();};
+
+function audioConstraints(){
+ const audio={echoCancellation:true,noiseSuppression:true,autoGainControl:$('auto-gain').checked,channelCount:1};
+ if($('mic-device').value)audio.deviceId={exact:$('mic-device').value};return audio;
+}
+async function refreshMicrophones(){
+ if(typeof navigator==='undefined'||!navigator.mediaDevices?.enumerateDevices)return;
+ try{
+  const devices=await navigator.mediaDevices.enumerateDevices();const selected=$('mic-device').value;
+  const options=[];const fallback=document.createElement('option');fallback.value='';fallback.textContent='System default microphone';options.push(fallback);
+  for(const device of devices.filter(d=>d.kind==='audioinput'&&d.deviceId)){const option=document.createElement('option');option.value=device.deviceId;option.textContent=device.label||'Microphone '+options.length;options.push(option);}
+  $('mic-device').replaceChildren(...options);$('mic-device').value=options.some(o=>o.value===selected)?selected:'';
+ }catch{$('audio-settings-status').textContent='Could not list microphones. The system default is still available.';}
+}
+function updateInputLevel(buffer){
+ const samples=new Int16Array(buffer);if(!samples.length)return;let sum=0,peak=0;
+ for(const sample of samples){const value=Math.abs(sample)/32768;sum+=value*value;peak=Math.max(peak,value);}
+ const db=20*Math.log10(Math.max(1e-6,Math.sqrt(sum/samples.length)));
+ $('mic-level').value=Math.round(Math.max(0,Math.min(100,(db+60)/60*100)));
+ const text=peak>=0.98?'Too loud — move back':db<-45?'Quiet / silence — move closer when speaking':'Input level OK';
+ if($('mic-level-label').textContent!==text)$('mic-level-label').textContent=text;
+}
+$('refresh-mics').onclick=refreshMicrophones;
+if(typeof navigator!=='undefined'){navigator.mediaDevices?.addEventListener?.('devicechange',refreshMicrophones);refreshMicrophones();}
