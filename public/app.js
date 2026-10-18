@@ -13,7 +13,7 @@ function flushCards(){for(const card of pendingCards){$('feed').prepend(card);}i
 let history=[],speakerStats={},recordedMs=0,recordingStarted=0,requests=0,gaps=[],reconnects=0,reconnectTimer;
 function reconnect(){if(!$('reconnect').checked||reconnects>=3)return;reconnects++;message('Connection interrupted. Reconnecting; some speech may be missing.');reconnectTimer=setTimeout(()=>{if($('reconnect').checked&&!recording)startLive();},2000);}
 const storageKey='eating-the-cats-session-v1';
-function persist(){if(!$('save-local').checked)return;try{localStorage.setItem(storageKey,JSON.stringify({version:1,history,committedText,pendingText,items:queue.items,sections:queue.sections,completed:[...queue.completed],recordedMs:recordedMs+(recordingStarted?Date.now()-recordingStarted:0),requests,gaps,speaker:$('speaker').value,duration:$('duration').value,budget:$('budget').value}));}catch{message('Device storage is full or unavailable. Export your session before closing.');}}
+function persist(){if(!$('save-local').checked)return;try{localStorage.setItem(storageKey,JSON.stringify({version:1,history,committedText,pendingText,items:queue.items,sections:queue.sections,completed:[...queue.completed],recordedMs:recordedMs+(recordingStarted?Date.now()-recordingStarted:0),requests,gaps,speaker:$('speaker').value,duration:$('duration').value,budget:$('budget').value}));return true;}catch{message('Device storage is full or unavailable. Export your session before closing.');return false;}}
 function updateSession(){
  for(const parent of queue.sections.filter(s=>s.status==='Claims queued')){const children=queue.sections.filter(s=>s.parent===parent.id);if(children.length&&children.every(s=>s.status==='Assessed'||s.status==='No checkable claim detected'))parent.status='Assessed in groups';}
  $('coverage').replaceChildren();
@@ -47,6 +47,8 @@ function refreshSupport(){
  $('support-pending').textContent=(decisive+unresolved)+' assessed · '+unresolved+' unresolved · '+queue.items.length+' research groups pending'+(pendingText.trim()?' · speech awaiting processing':'');
 }
 function refresh(){
+ if($('session-summary').open)$('summary-text').textContent=sessionSummary();
+ $('summary-restore').disabled=busy||recording||stopping;
  refreshSupport();
  updateSession();
  $('count').textContent=`${seenClaims.size} CLAIMS`;
@@ -283,3 +285,26 @@ function openClaimCategory(verdict){
  $('feed').scrollTop=0;$('feed').focus?.({preventScroll:true});$('verdict-filter').scrollIntoView?.({block:'start',behavior:'instant'});
 }
 for(const [id,verdict] of [['supported','Supported'],['contradicted','Contradicted'],['context','Needs Context'],['unverified','Unverified']])$('filter-'+id).onclick=()=>openClaimCategory(verdict);
+
+function sessionSummary(){
+ const coverage=queue.coverage(),unique=new Map();
+ for(const entry of history)for(const claim of entry.data.claims){const key=JSON.stringify([entry.speaker,claim.claim.toLowerCase().replace(/\s+/g,' ').trim()]);if(!unique.has(key))unique.set(key,{claim,speaker:entry.speaker,sources:entry.data.sources});}
+ const seconds=Math.floor((recordedMs+(recordingStarted?Date.now()-recordingStarted:0))/1000);
+ const lines=['Eating the Cats — Session summary','Snapshot: '+new Date().toISOString(),'Recorded duration: '+Math.floor(seconds/60)+'m '+seconds%60+'s',
+ 'Coverage: '+coverage.done+'/'+coverage.total+' sections processed'+(coverage.done<coverage.total||pendingText.trim()||recording?' — incomplete / ongoing':''),
+ unique.size+' assessed claims · '+queue.items.length+' pending research groups · '+gaps.length+' connection gaps',
+ 'These are evidence assessments, not a rating of speaker honesty. Processing coverage does not guarantee every claim was detected.'];
+ for(const verdict of Object.keys(counts)){
+  const entries=[...unique.values()].filter(x=>x.claim.verdict===verdict);lines.push('',''+verdict+' ('+entries.length+')');
+  for(const {claim,speaker,sources} of entries){lines.push('- '+claim.claim+(speaker?' ['+speaker+']':''),'  '+claim.explanation);for(const id of claim.source_ids){const source=sources[id-1];if(source){try{const url=new URL(source.url);if(['http:','https:'].includes(url.protocol))lines.push('  Source: '+source.title+' — '+url.href);}catch{}}}}
+ }
+ if(queue.items.length){lines.push('','Unfinished checks');for(const item of queue.items)lines.push('- ['+item.status+'] '+(item.selectedClaims?.join(' · ')||item.text));}
+ if(pendingText.trim())lines.push('','Speech awaiting processing',pendingText);
+ if(partialSpeech.trim())lines.push('','Interim speech — not finalized',partialSpeech);
+ if(!unique.size)lines.push('','No completed claim assessments yet.');
+ return lines.join('\n');
+}
+$('session-summary').ontoggle=()=>{if($('session-summary').open)$('summary-text').textContent=sessionSummary();};
+$('save-session').onclick=()=>{const previous=$('save-local').checked;$('save-local').checked=true;if(persist())message('Session saved on this device. Autosave is on.');else $('save-local').checked=previous;};
+$('summary-restore').onclick=()=>{if(!busy&&!recording&&!stopping)$('restore').onclick();};
+$('download-summary').onclick=()=>{const blob=new Blob([sessionSummary()],{type:'text/plain;charset=utf-8'});const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='eating-the-cats-summary-'+new Date().toISOString().replace(/[:.]/g,'-')+'.txt';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};

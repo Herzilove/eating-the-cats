@@ -165,3 +165,13 @@ test('Category buttons reveal buffered matching claims and switch to filtered re
  b.get('filter-unverified').onclick();assert.equal(b.get('filter-empty').hidden,false);assert.equal(b.get('filter-empty').textContent,'No unverified claims yet.');
  b.views[0].onclick();assert.equal(b.get('filter-empty').hidden,true);
 });
+
+test('Summary deduplicates streamed results, keeps cited sources and exposes unfinished work',async()=>{
+ const b=await browser();b.context.entry={speaker:'A',data:{claims:[{claim:'A statement',verdict:'Supported',explanation:'Supported explanation',source_ids:[1]}],sources:[{title:'Evidence',url:'https://example.com/evidence'}]}};
+ vm.runInContext("history=[entry,entry];queue.enqueue('Unfinished statement');pendingText='More speech';",b.context);
+ const summary=vm.runInContext('sessionSummary()',b.context);assert.match(summary,/Supported \(1\)/);assert.match(summary,/https:\/\/example.com\/evidence/);assert.match(summary,/Unfinished statement/);assert.match(summary,/incomplete/);
+});
+test('Save button enables device persistence and does not report success on storage failure',async()=>{
+ const b=await browser();b.get('save-session').onclick();assert.equal(b.get('save-local').checked,true);assert.equal(b.storage.size,1);assert.match(b.get('message').textContent,/Session saved/);
+ b.get('save-local').checked=false;b.context.localStorage.setItem=()=>{throw Error('full');};b.get('save-session').onclick();assert.equal(b.get('save-local').checked,false);assert.match(b.get('message').textContent,/full or unavailable/);
+});
