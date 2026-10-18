@@ -7,7 +7,7 @@ let pendingCards=[],retryTimer;
 let lastCommitAt=0,partialSpeech='',pendingSince=0;
 const uiLabels={};
 const label=value=>uiLabels[value]||value;
-function applyFilter(){const selected=$('verdict-filter').value||'all';for(const card of $('feed').children)card.hidden=selected!=='all'&&card.dataset.verdict!==selected;}
+function applyFilter(){const selected=$('verdict-filter').value||'all';for(const card of $('feed').children)card.hidden=selected!=='all'&&card.dataset.verdict!==selected;const matches=[...$('feed').children].filter(card=>card.dataset.verdict&&!card.hidden);$('filter-empty').hidden=selected==='all'||matches.length>0;$('filter-empty').textContent='No '+selected.toLowerCase()+' claims yet.';}
 function flushCards(){for(const card of pendingCards){$('feed').prepend(card);}if(pendingCards.length)pendingCards.at(-1).open=true;pendingCards=[];$('new-results').hidden=true;applyFilter();}
 
 let history=[],speakerStats={},recordedMs=0,recordingStarted=0,requests=0,gaps=[],reconnects=0,reconnectTimer;
@@ -274,3 +274,12 @@ function applySpeechOptions(params){
  for(const hint of options.hints)params.append('keyterms',hint);
  params.set('filter_background_audio',String(options.filter));
 }
+
+function openClaimCategory(verdict){
+ document.body.dataset.view='evidence';
+ document.querySelectorAll('button[data-view]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.view==='evidence')));
+ $('verdict-filter').value=verdict;flushCards();
+ const first=[...$('feed').children].find(card=>card.dataset.verdict===verdict);if(first)first.open=true;
+ $('feed').scrollTop=0;$('feed').focus?.({preventScroll:true});$('verdict-filter').scrollIntoView?.({block:'start',behavior:'instant'});
+}
+for(const [id,verdict] of [['supported','Supported'],['contradicted','Contradicted'],['context','Needs Context'],['unverified','Unverified']])$('filter-'+id).onclick=()=>openClaimCategory(verdict);

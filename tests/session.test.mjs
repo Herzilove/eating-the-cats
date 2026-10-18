@@ -156,3 +156,12 @@ test('Invalid hints are rejected before microphone capture; settings lock during
  const b=await browser();b.get('speech-hints').value='x'.repeat(50);const before=b.fetches();await vm.runInContext('startLive()',b.context);assert.equal(b.fetches(),before);assert.match(b.get('message').textContent,/short hints/);
  vm.runInContext('recording=true;refresh()',b.context);for(const id of ['speech-language','speech-hints','background-filter'])assert.equal(b.get(id).disabled,true);
 });
+
+test('Category buttons reveal buffered matching claims and switch to filtered results',async()=>{
+ const b=await browser();b.context.data={claims:[{claim:'First',verdict:'Supported',explanation:'Evidence',source_ids:[]},{claim:'Second',verdict:'Contradicted',explanation:'Evidence',source_ids:[]}],sources:[],searches:[],checkedAt:new Date().toISOString()};
+ vm.runInContext("render(data,'')",b.context);b.get('filter-contradicted').onclick();
+ assert.equal(vm.runInContext('document.body.dataset.view',b.context),'evidence');assert.equal(b.get('verdict-filter').value,'Contradicted');assert.equal(vm.runInContext('pendingCards.length',b.context),0);
+ const visible=b.get('feed').children.filter(c=>!c.hidden);assert.equal(visible.length,1);assert.equal(visible[0].dataset.verdict,'Contradicted');assert.equal(visible[0].open,true);
+ b.get('filter-unverified').onclick();assert.equal(b.get('filter-empty').hidden,false);assert.equal(b.get('filter-empty').textContent,'No unverified claims yet.');
+ b.views[0].onclick();assert.equal(b.get('filter-empty').hidden,true);
+});
