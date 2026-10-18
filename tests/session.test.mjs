@@ -79,3 +79,15 @@ test('Context spans recent sections but never mixes different speakers',()=>{
  const q=new ResearchQueue();q.enqueue('The city we are discussing is Paris.','A');q.enqueue('It has','A');q.enqueue('Unrelated statement','B');q.enqueue('more than two million residents.','A');
  assert.match(q.items.at(-1).context,/Paris/);assert.match(q.items.at(-1).context,/It has/);assert.doesNotMatch(q.items.at(-1).context,/Unrelated/);
 });
+
+test('Interim words update immediately without rewriting the collapsed transcript history',async()=>{
+ const b=await browser();b.get('transcript-preview').scrollHeight=900;
+ vm.runInContext("committedText='Earlier sentence. '.repeat(1000);showTranscript('New words right now');",b.context);
+ assert.equal(b.get('transcript-interim').textContent,'New words right now');
+ assert.ok(b.get('transcript-final').textContent.length<=281);
+ assert.equal(b.get('transcript-preview').scrollTop,900);
+ assert.equal(b.get('transcript').textContent,'');
+ vm.runInContext("partialSpeech='Revised words';",b.context);b.get('transcript-expander').open=true;b.get('transcript-expander').ontoggle();
+ assert.ok(b.get('transcript').textContent.endsWith('Revised words'));
+ assert.ok(b.get('transcript').textContent.length>10000);
+});

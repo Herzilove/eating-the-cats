@@ -110,7 +110,16 @@ $('reset').onclick=()=>{if(busy||recording||stopping)return;pendingCards=[];hist
 $('display').onclick=()=>{const enabled=document.body.classList.toggle('display-mode');$('display').textContent=enabled?'Exit display mode':'Display mode';$('display').setAttribute('aria-pressed',String(enabled));};
 refresh();
 function shouldCommitSpeech(){return !!partialSpeech.trim()&&Date.now()-lastCommitAt>=20000;}
-function showTranscript(partial=''){$('transcript-preview').textContent=[committedText,partial].filter(Boolean).join(' ').slice(-350);$('transcript').textContent=[committedText,partial].filter(Boolean).join(' ');$('transcript').scrollTop=$('transcript').scrollHeight;}
+function showTranscript(partial=''){
+ const preview=$('transcript-preview');
+ $('transcript-final').textContent=committedText.slice(-280)+(partial&&committedText?' ':'');
+ $('transcript-interim').textContent=partial;
+ preview.scrollTop=preview.scrollHeight;
+ if($('transcript-expander').open){
+  const full=$('transcript');full.textContent=[committedText,partial].filter(Boolean).join(' ');full.scrollTop=full.scrollHeight;
+ }
+}
+$('transcript-expander').ontoggle=()=>{if($('transcript-expander').open)showTranscript(partialSpeech);};
 async function startupStep(promise,milliseconds,error){let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(error)),milliseconds);})]);}finally{clearTimeout(timer);}}
 function cleanupAudio(){stream?.getTracks().forEach(t=>t.stop());stream=null;sourceNode?.disconnect();pcmNode?.disconnect();muteNode?.disconnect();if(audioContext&&audioContext.state!=='closed')audioContext.close().catch(()=>{});audioContext=null;}
 function stop(){
