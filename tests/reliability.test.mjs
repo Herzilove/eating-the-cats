@@ -56,3 +56,37 @@ test('Tool loop streams actual search activity, validates citations and reuses c
 });
 
 test('The same claim by different speakers is retained for comparison',()=>{const q=new ResearchQueue();q.enqueue('The same claim','A');q.enqueue('The same claim','B');assert.equal(q.items.length,2);});
+for(const failOne of [false,true])test(`Concurrent claims stream independently and preserve citation scopes (failure=${failOne})`,{timeout:3000},async()=>{
+ const original=globalThis.fetch;const saved={...process.env};let releaseSlow;let searches=0;let active=0;let peak=0;let first;
+ Object.assign(process.env,{NEBIUS_API_KEY:'test',NEBIUS_MODEL:'parallel-test',TAVILY_API_KEY:'test'});
+ const slow=new Promise(resolve=>{releaseSlow=resolve;});
+ globalThis.fetch=async(url,options)=>{
+  const body=JSON.parse(options.body);
+  if(url.includes('tavily')){
+   searches++;active++;peak=Math.max(peak,active);
+   if(body.query==='Alpha')await slow;
+   active--;
+   return {ok:true,json:async()=>({results:[{title:body.query,url:'https://example.org/'+body.query,content:'Evidence for '+body.query}]})};
+  }
+  if(!body.tools)return {ok:true,json:async()=>({choices:[{message:{content:'{"claims":["Alpha","Beta"]}'}}]})};
+  const name=body.messages.find(m=>m.content?.startsWith('Assess only'))?.content.includes('Alpha')?'Alpha':'Beta';
+  if(!body.messages.some(m=>m.role==='tool'))return {ok:true,json:async()=>({choices:[{message:{role:'assistant',content:null,tool_calls:[{id:'tool-'+name,type:'function',function:{name:'search_web',arguments:JSON.stringify({query:name})}}]}}]})};
+  return {ok:true,json:async()=>({choices:[{message:{role:'assistant',content:JSON.stringify({claims:[{claim:name,verdict:'Supported',explanation:'Evidence found',source_ids:[failOne&&name==='Alpha'?99:1]}]})}}]})};
+ };
+ const res=response();const write=res.write;
+ res.write=function(line){write.call(this,line);const event=JSON.parse(line);if(event.type==='claim_result'){first??=event.data.claims[0].claim;if(event.data.claims[0].claim==='Beta')releaseSlow();}};
+ try{
+  await check({method:'POST',headers:{accept:'application/x-ndjson'},body:{text:'Parallel test '+failOne}},res);
+  const events=res.lines.trim().split('\n').map(JSON.parse);
+  assert.equal(peak,2);assert.equal(searches,2);assert.equal(first,'Beta');assert.ok(events.some(e=>e.type==='claim_result'));
+  if(failOne){assert.ok(events.some(e=>e.type==='error'));assert.equal(events.filter(e=>e.type==='claim_result').length,1);assert.ok(!events.some(e=>e.type==='result'));}
+  else{const result=events.find(e=>e.type==='result').data;assert.equal(result.claims.length,2);assert.equal(result.sources[result.claims[1].source_ids[0]-1].title,'Beta');assert.deepEqual(result.claims.map(c=>c.claim),['Alpha','Beta']);}
+ }finally{releaseSlow();globalThis.fetch=original;for(const key of ['NEBIUS_API_KEY','NEBIUS_MODEL','TAVILY_API_KEY']){if(saved[key]===undefined)delete process.env[key];else process.env[key]=saved[key];}}
+});
+test('Parallel workers cannot exceed the shared three-search allocation',async()=>{
+ const oldFetch=globalThis.fetch,saved={...process.env};let calls=0;Object.assign(process.env,{NEBIUS_API_KEY:'test',NEBIUS_MODEL:'budget-model',TAVILY_API_KEY:'test'});
+ globalThis.fetch=async(url,options)=>{const body=JSON.parse(options.body);if(url.includes('tavily')){calls++;return {ok:true,json:async()=>({results:[{title:'Evidence',url:'https://example.org',content:'Evidence'}]})};}
+ if(!body.tools)return {ok:true,json:async()=>({choices:[{message:{content:'{"claims":["First","Second","Third"]}'}}]})};
+ const tool=body.messages.some(m=>m.role==='tool');return {ok:true,json:async()=>({choices:[{message:tool?{role:'assistant',content:'{"claims":[{"claim":"Claim","verdict":"Supported","explanation":"Evidence","source_ids":[1]}]}'}:{role:'assistant',tool_calls:[1,2,3].map(id=>({id:String(id),type:'function',function:{name:'search_web',arguments:'{"query":"Evidence search"}'}}))}}]})};};
+ try{const res=response();await check({method:'POST',headers:{accept:'application/x-ndjson'},body:{text:'Budget allocation test'}},res);assert.equal(calls,3);assert.ok(res.lines.includes('"type":"result"'));}finally{globalThis.fetch=oldFetch;for(const key of ['NEBIUS_API_KEY','NEBIUS_MODEL','TAVILY_API_KEY']){if(saved[key]===undefined)delete process.env[key];else process.env[key]=saved[key];}}
+});

@@ -40,7 +40,7 @@ function activity(phase,text){
  while($('activity').children.length>8)$('activity').lastChild.remove();
 }
 function render(data,speaker,remember=true){
- if(remember)history.push({data,speaker});
+ if(remember&&data.claims.some(c=>!seenClaims.has(JSON.stringify([speaker,c.claim.toLowerCase().replace(/\s+/g,' ').trim()]))))history.push({data,speaker});
  for(const c of data.claims){
   const key=JSON.stringify([speaker,c.claim.toLowerCase().replace(/\s+/g,' ').trim()]);if(seenClaims.has(key))continue;
   if(!seenClaims.size)$('feed').replaceChildren();seenClaims.add(key);counts[c.verdict]++;
@@ -59,11 +59,11 @@ function render(data,speaker,remember=true){
  }
  refresh();
 }
-async function research(text,signal){
+async function research(text,signal,onClaim=()=>{}){
  const response=await fetch('/api/check',{method:'POST',headers:{...headers(),Accept:'application/x-ndjson'},body:JSON.stringify({text}),signal});
  if(!response.ok){const data=await response.json();throw Error(data.error||'Request failed');}
  const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',result;
- const consume=line=>{if(!line.trim())return;const event=JSON.parse(line);if(event.type==='error')throw Error(event.error);if(event.type==='activity'){activity(event.phase,event.message);$('pending-phase')?.replaceChildren(document.createTextNode(event.phase));}if(event.type==='claims')showPending(event.claims.join(' • '),'Searching');if(event.type==='sources'){for(const source of event.sources){const u=new URL(source.url);if(!['http:','https:'].includes(u.protocol))continue;const a=document.createElement('a');a.href=u.href;a.rel='noopener noreferrer';a.target='_blank';a.textContent=source.title;$('inflight').firstChild?.append(a);}}if(event.type==='result')result=event.data;};
+ const consume=line=>{if(!line.trim())return;const event=JSON.parse(line);if(event.type==='error')throw Error(event.error);if(event.type==='activity'){activity(event.phase,event.message);$('pending-phase')?.replaceChildren(document.createTextNode(event.phase));}if(event.type==='claims')showPending(event.claims.join(' • '),'Searching');if(event.type==='sources'){for(const source of event.sources){const u=new URL(source.url);if(!['http:','https:'].includes(u.protocol))continue;const a=document.createElement('a');a.href=u.href;a.rel='noopener noreferrer';a.target='_blank';a.textContent=source.title;$('inflight').firstChild?.append(a);}}if(event.type==='claim_result'){onClaim(event.data);activity('Assessing','A claim is ready; remaining research continues.');}if(event.type==='claim_error')activity('Retry needed',event.error);if(event.type==='result')result=event.data;};
  try{while(true){const {value,done}=await reader.read();buffer+=decoder.decode(value,{stream:!done});let end;while((end=buffer.indexOf('\n'))>=0){consume(buffer.slice(0,end));buffer=buffer.slice(end+1);}if(done)break;}consume(buffer);}finally{reader.releaseLock();}
  if(!result)throw Error('Research connection ended before a result arrived.');return result;
 }
@@ -74,7 +74,7 @@ async function drainResearch(){
  while(queue.current&&!queue.paused){
   if(requests>=Number($('budget').value)){queue.paused=true;message('Research allowance reached. Increase the limit, then retry.');refresh();break;}
   requests++;busy=true;requestController=new AbortController();const deadline=setTimeout(()=>requestController.abort(),57000);const item=queue.current;refresh();showPending(item.text,'Detecting');message('Researching the next transcript batch…');
-  try{const data=await research(item.text,requestController.signal);render(data,item.speaker);queue.acknowledge();$('inflight').replaceChildren();activity('Complete',data.claims.length?'Assessment complete. Review the linked evidence.':'No checkable claims found.');message('Assessment complete.');}
+  try{const data=await research(item.text,requestController.signal,partial=>render(partial,item.speaker));render(data,item.speaker);queue.acknowledge();$('inflight').replaceChildren();activity('Complete',data.claims.length?'Assessment complete. Review the linked evidence.':'No checkable claims found.');message('Assessment complete.');}
   catch(e){showPending(queue.current?.text||'','Paused — text retained');queue.paused=true;activity('Paused','Your transcript is retained for retry.');message(e.name==='AbortError'?'Research cancelled or timed out. Pending text is kept.':e.message);}
   finally{clearTimeout(deadline);busy=false;requestController=null;refresh();}
  }

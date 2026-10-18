@@ -51,3 +51,9 @@ Import the repository as an Other-framework project. Serve `public` as configure
 Live, Evidence and Panel views share a persistent recording control. Pause and wait for the final transcript before changing the manual speaker label. Speaker A/B buttons and custom labels associate future text with that label; this is not automatic diarization. The same statement by different speakers is retained separately. Panel counts are evidence categories, never an honesty rating.
 
 A configurable 20/50/100 research-request allowance pauses automatic research when reached, including failed attempts. It is a tab-level convenience, not a dollar budget or security boundary. Server rate limits and provider budgets still apply. No paid provider retries occur automatically.
+
+## Parallel research
+
+Streaming checks research up to two extracted claims concurrently and emit each validated assessment immediately. Searches requested together within a claim's tool round also run concurrently. The batch still has at most three Tavily searches: three for one claim, two plus one for two claims, or one each for three claims. This bounds search cost but leaves less room for follow-up evidence when a batch has several claims; insufficient evidence must remain Unverified or Needs Context. Model-call counts may increase for multi-claim batches.
+
+Each claim has its own evidence IDs, remapped when assembling the final batch response. Successful partial results are shown and cached for five minutes even if another claim fails. Failed batches stay queued for explicit retry; completed claims can reuse that cache. The 52-second overall deadline and cancellation signal cover all workers. This reduces waiting between independent work; it does not guarantee provider latency or a fixed speedup.
