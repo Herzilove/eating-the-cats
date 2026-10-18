@@ -91,3 +91,12 @@ test('Interim words update immediately without rewriting the collapsed transcrip
  assert.ok(b.get('transcript').textContent.endsWith('Revised words'));
  assert.ok(b.get('transcript').textContent.length>10000);
 });
+
+test('Claim support excludes unresolved and pending claims and has no empty-session score',async()=>{
+ const b=await browser();assert.equal(b.get('support-score').textContent,'—');
+ vm.runInContext("counts.Supported=3;counts.Contradicted=1;counts['Needs Context']=2;counts.Unverified=4;queue.enqueue('Pending statement');refresh();",b.context);
+ assert.equal(b.get('support-score').textContent,'75%');
+ assert.match(b.get('support-pending').textContent,/10 assessed · 6 unresolved · 1 research groups pending/);
+ b.get('reset').onclick();assert.equal(b.get('support-score').textContent,'—');
+ vm.runInContext("counts.Unverified=5;refresh();",b.context);assert.equal(b.get('support-score').textContent,'—');
+});

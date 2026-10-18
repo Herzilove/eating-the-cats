@@ -34,7 +34,16 @@ const counts={'Supported':0,'Contradicted':0,'Needs Context':0,'Unverified':0};
 const message=s=>$('message').textContent=s;
 const headers=()=>({'Content-Type':'application/json'});
 async function post(path,body){const r=await fetch(path,{method:'POST',headers:headers(),body:JSON.stringify(body),signal:AbortSignal.timeout(20000)});const data=await r.json();if(!r.ok)throw Error(data.error||'Request failed');return data;}
+function refreshSupport(){
+ const supported=counts.Supported,contradicted=counts.Contradicted,decisive=supported+contradicted;
+ const unresolved=counts['Needs Context']+counts.Unverified;
+ $('support-score').textContent=decisive?Math.round(100*supported/decisive)+'%':'—';
+ $('support-basis').textContent=decisive?supported+' supported · '+contradicted+' contradicted': 'No supported or contradicted claims yet';
+ for(const [id,key] of [['supported','Supported'],['contradicted','Contradicted'],['context','Needs Context'],['unverified','Unverified']])$('support-'+id).textContent=counts[key];
+ $('support-pending').textContent=(decisive+unresolved)+' assessed · '+unresolved+' unresolved · '+queue.items.length+' research groups pending'+(pendingText.trim()?' · speech awaiting processing':'');
+}
 function refresh(){
+ refreshSupport();
  updateSession();
  $('count').textContent=`${seenClaims.size} CLAIMS`;
  $('progress-line').textContent=`${seenClaims.size} assessed · ${busy?1:0} section in progress · ${Math.max(0,queue.items.length-(busy?1:0))} waiting`;
