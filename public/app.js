@@ -20,6 +20,7 @@ function updateSession(){
  const totals={};for(const section of queue.sections){totals[section.status]=(totals[section.status]||0)+1;const row=document.createElement('details');const summary=document.createElement('summary');summary.textContent='#'+section.id+' · '+label(section.status)+(section.duplicate?' (see #'+section.duplicate+')':'')+' · '+(section.speaker||'Unknown')+' · '+new Date(section.createdAt).toLocaleTimeString();const p=document.createElement('p');p.textContent=section.selectedClaims?section.selectedClaims.join(' • '):section.text;row.append(summary,p);$('coverage').append(row);}
  $('coverage-count').textContent=Object.entries(totals).map(([status,n])=>n+' '+label(status)).join(' · ')||'No sections yet';
  $('duration').disabled=recording||stopping;
+ for(const id of ['speech-language','speech-hints','background-filter'])$(id).disabled=recording||stopping;
  $('mic-device').disabled=recording||stopping;$('auto-gain').disabled=recording||stopping;
  $('speaker').disabled=recording||stopping;
  document.querySelectorAll('[data-speaker]').forEach(b=>b.disabled=recording||stopping);
@@ -155,6 +156,7 @@ async function startLive(){
  if(recording||stopping)return;
  if(queue.paused){message('Retry or clear the pending research before recording again.');return;}
  if(recordedMs>=Number($('duration').value)*60000){message('Recording allowance reached. Increase it or reset the session.');return;}
+ try{speechOptions();}catch(error){message(error.message);return;}
  const id=++sessionId;recording=true;refresh();$('mic').textContent='■ Pause listening';$('live').textContent='CONNECTING';message('Connecting to ElevenLabs live transcription…');
  try{
   const Context=window.AudioContext||window.webkitAudioContext;if(!Context||!navigator.mediaDevices?.getUserMedia)throw Error('Live recording requires HTTPS and a supported browser.');
@@ -174,7 +176,7 @@ async function startLive(){
   message('Requesting a secure transcription connection…');
   const {token}=await post('/api/scribe-token',{});if(!recording||id!==sessionId)return;
   await startupStep(audioContext.audioWorklet.addModule('/pcm-worklet.js'),10000,'Audio processing could not load. Reload the page and try again.');if(!recording||id!==sessionId)return;
-  const rate=audioContext.sampleRate;audioRate=rate;const url=new URL('wss://api.elevenlabs.io/v1/speech-to-text/realtime');url.search=new URLSearchParams({model_id:'scribe_v2_realtime',token,audio_format:`pcm_${rate}`,commit_strategy:'vad',vad_silence_threshold_secs:'0.7'});
+  const rate=audioContext.sampleRate;audioRate=rate;const url=new URL('wss://api.elevenlabs.io/v1/speech-to-text/realtime');url.search=new URLSearchParams({model_id:'scribe_v2_realtime',token,audio_format:`pcm_${rate}`,commit_strategy:'vad',vad_silence_threshold_secs:'0.7'});applySpeechOptions(url.searchParams);
   const ws=new WebSocket(url);socket=ws;lastCommitAt=Date.now();partialSpeech='';showTranscript();
   const connectionTimer=setTimeout(()=>{if(ws.readyState===WebSocket.CONNECTING){message('Live connection timed out. Please retry.');stop();}},15000);
   ws.onopen=()=>{clearTimeout(connectionTimer);if(!recording||id!==sessionId){ws.close();return;}sourceNode=audioContext.createMediaStreamSource(stream);pcmNode=new AudioWorkletNode(audioContext,'pcm-stream');muteNode=audioContext.createGain();muteNode.gain.value=0;sourceNode.connect(pcmNode);pcmNode.connect(muteNode);muteNode.connect(audioContext.destination);pcmNode.port.onmessage=event=>{if(ws.readyState!==WebSocket.OPEN||!recording)return;if(ws.bufferedAmount>256000){message('Audio connection is too slow. Please retry.');stop();return;}updateInputLevel(event.data);const bytes=new Uint8Array(event.data);let binary='';for(const byte of bytes)binary+=String.fromCharCode(byte);const commit=shouldCommitSpeech();if(commit)lastCommitAt=Date.now();ws.send(JSON.stringify({message_type:'input_audio_chunk',audio_base_64:btoa(binary),sample_rate:rate,...(commit?{commit:true}:{})}));};recordingStarted=Date.now();$('live').textContent='LIVE';message('Listening continuously. Statements are queued for checking while you speak.');stopTimer=setTimeout(stop,Math.max(1,Number($('duration').value)*60000-recordedMs));};
@@ -258,3 +260,17 @@ function updateInputLevel(buffer){
 }
 $('refresh-mics').onclick=refreshMicrophones;
 if(typeof navigator!=='undefined'){navigator.mediaDevices?.addEventListener?.('devicechange',refreshMicrophones);refreshMicrophones();}
+
+function speechOptions(){
+ const language=$('speech-language').value;
+ if(!['','en','de'].includes(language))throw Error('Choose Auto-detect, English or German.');
+ const hints=[...new Set($('speech-hints').value.split(/[,;\n]+/).map(s=>s.trim()).filter(Boolean))];
+ if(hints.length>50||hints.some(s=>s.length>=50))throw Error('Use up to 50 short hints, each under 50 characters, separated by commas.');
+ return {language,hints,filter:$('background-filter').checked};
+}
+function applySpeechOptions(params){
+ const options=speechOptions();
+ if(options.language)params.set('language_code',options.language);
+ for(const hint of options.hints)params.append('keyterms',hint);
+ params.set('filter_background_audio',String(options.filter));
+}

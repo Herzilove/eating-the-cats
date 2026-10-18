@@ -143,3 +143,16 @@ test('Device refresh preserves a selected microphone and falls back when removed
  b.get('mic-device').value='usb';await vm.runInContext('refreshMicrophones()',b.context);assert.equal(b.get('mic-device').value,'usb');
  b.context.navigator.mediaDevices.enumerateDevices=async()=>[];await vm.runInContext('refreshMicrophones()',b.context);assert.equal(b.get('mic-device').value,'');
 });
+
+test('Speech options default to auto language without paid hints or filtering',async()=>{
+ const b=await browser();b.context.params=new URLSearchParams();vm.runInContext('applySpeechOptions(params)',b.context);
+ assert.equal(b.context.params.has('language_code'),false);assert.deepEqual(b.context.params.getAll('keyterms'),[]);assert.equal(b.context.params.get('filter_background_audio'),'false');
+});
+test('English and German language hints and background filtering are encoded safely',async()=>{
+ const b=await browser();b.get('speech-hints').value='NVIDIA, München; NVIDIA\nenergy & climate';b.get('background-filter').checked=true;
+ for(const language of ['en','de']){b.get('speech-language').value=language;b.context.params=new URLSearchParams();vm.runInContext('applySpeechOptions(params)',b.context);assert.equal(b.context.params.get('language_code'),language);assert.deepEqual(b.context.params.getAll('keyterms'),['NVIDIA','München','energy & climate']);assert.equal(b.context.params.get('filter_background_audio'),'true');}
+});
+test('Invalid hints are rejected before microphone capture; settings lock during recording',async()=>{
+ const b=await browser();b.get('speech-hints').value='x'.repeat(50);const before=b.fetches();await vm.runInContext('startLive()',b.context);assert.equal(b.fetches(),before);assert.match(b.get('message').textContent,/short hints/);
+ vm.runInContext('recording=true;refresh()',b.context);for(const id of ['speech-language','speech-hints','background-filter'])assert.equal(b.get(id).disabled,true);
+});
