@@ -1,0 +1,1 @@
+{"outputDirectory":"public","functions":{"api/check.mjs":{"maxDuration":60},"api/transcribe.mjs":{"maxDuration":60}}}

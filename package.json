@@ -1,0 +1,1 @@
+{"name":"eating-the-cats","private":true,"type":"module","scripts":{"start":"node --env-file-if-exists=.env.local server.mjs","test":"node --test"},"engines":{"node":">=22"}}

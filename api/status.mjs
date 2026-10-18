@@ -1,0 +1,1 @@
+export default function handler(req,res){res.setHeader('Cache-Control','no-store');res.status(200).json({nebius:!!(process.env.NEBIUS_API_KEY&&process.env.NEBIUS_MODEL),tavily:!!process.env.TAVILY_API_KEY,elevenlabs:!!process.env.ELEVENLABS_API_KEY,notice:'Configuration only; live API access has not been validated by this endpoint.'});}
