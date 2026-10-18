@@ -6,7 +6,7 @@
 
 ## Solution
 
-Eating the Cats is a live evidence companion for conversations. It transcribes speech, extracts factual claims, researches them through an agentic search loop, and presents assessments with linked evidence. Users can keep speaking while research runs independently. English and German are intended use cases, with automatic transcription language detection.
+Eating the Cats is a research agent powered by NVIDIA Nemotron on Nebius Token Factory and Tavily. Nemotron extracts factual claims, chooses searches and assesses the retrieved evidence, producing explanations with source links. Live conversation is the input experience: users can keep speaking while research runs independently, or enter text directly. ElevenLabs provides supporting speech-to-text input with automatic language detection; English and German are intended use cases.
 
 The goal is to make verification inspectable: show the statement, the search activity, the evidence and the uncertainty. The app does not infer a person's honesty. Speaker attribution is manually selected. The support percentage is Supported / (Supported + Contradicted), with unresolved statements and processing coverage displayed separately.
 
@@ -19,11 +19,15 @@ The goal is to make verification inspectable: show the statement, the search act
 - Live, Results and Speakers views, filters, presentation mode and coverage ledger.
 - Session recording/request allowances, optional local saving, restore and JSON export.
 
-## Partner technology
+## Core research technology
 
 - NVIDIA Nemotron 3 Super (`nvidia/nemotron-3-super-120b-a12b`) runs through Nebius Token Factory for claim extraction, tool calling and evidence assessment.
 - Tavily provides basic web search with source excerpts and URLs. Search allocation is bounded per research group.
-- ElevenLabs Scribe v2 Realtime provides streaming speech recognition. Vercel issues short-lived single-use tokens so the permanent key never enters browser code.
+
+## Supporting speech and hosting services
+
+- ElevenLabs Scribe v2 Realtime provides streaming speech-to-text input. It does not perform claim research or evidence assessment. Vercel issues short-lived single-use tokens so the permanent key never enters browser code.
+- Vercel hosts the browser application and server-side API routes. Text input can demonstrate the research agent independently of speech transcription.
 
 ## Verification and limitations
 

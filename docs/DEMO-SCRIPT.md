@@ -16,7 +16,7 @@ If Loom is not ready, use a screen recorder already available on your computer a
 
 Show the main page.
 
-"In a live conversation, claims move faster than we can verify them. Eating the Cats listens, identifies factual statements and brings the evidence into the conversation."
+"Claims move faster than we can verify them. Eating the Cats is a research agent powered by NVIDIA Nemotron on Nebius Token Factory and Tavily. It brings traceable evidence into live conversations."
 
 ### 0:15–0:40 — real speech input
 
@@ -26,7 +26,7 @@ Click Start listening and allow the microphone. Say clearly:
 
 Pause briefly so speech can commit. Show partial text becoming final. Then pause listening to keep the demo focused.
 
-"ElevenLabs transcribes speech live. Recording and research are independent, so the app can queue new statements while earlier ones are being checked."
+"Speech input is provided by ElevenLabs. Recording and research run independently, so new statements can enter the queue while earlier claims are checked. You can also enter text directly."
 
 ### 0:40–1:15 — agentic research and evidence
 

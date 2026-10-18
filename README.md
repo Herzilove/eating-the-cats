@@ -5,7 +5,7 @@
 
 The diagram's "any language" label means automatic detection of supported languages, not universal language support. Session support is Supported / (Supported + Contradicted), with unresolved claims and coverage shown separately. Speaker labels are manual. The app does not rate personal honesty.
 
-A mobile-friendly live fact-checking prototype using ElevenLabs Realtime Scribe, Nemotron through Nebius Token Factory, and Tavily search. The current app is plain browser JavaScript with Node serverless handlers; it has no build dependencies.
+A mobile-friendly research agent powered by NVIDIA Nemotron through Nebius Token Factory and Tavily search. Nemotron extracts claims, chooses searches and assesses evidence. ElevenLabs Scribe v2 Realtime supplies supporting speech-to-text input; users can also enter text directly. The current app is plain browser JavaScript with Node serverless handlers; it has no build dependencies.
 
 ## Local setup
 
@@ -80,4 +80,5 @@ The English Live view shows one published assessment, current detection, a three
 ### Continuous single-speaker listening
 
 The default live view prioritizes detection, transcript, and evidence. Optional speaker controls are collapsed inside session settings. Finalized speech is queued at sentence boundaries, with an eight-second maximum wait for an unfinished tail; stopping flushes the tail. Research sections are capped at 700 characters and receive up to 1,200 characters of recent same-speaker context. The extraction prompt can recover assertions completed across section boundaries. During continuous partial speech, an audio chunk requests a commit after 20 seconds without a final transcript. Natural VAD commits reset this deadline. This bounds the request cadence, not provider response latency. Recognition and claim recall are not guaranteed; failed research and request limits remain visible and retryable. Smaller sections can consume the existing research allowance faster.
+
 
