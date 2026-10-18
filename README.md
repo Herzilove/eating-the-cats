@@ -1,4 +1,9 @@
 # Eating the Cats
+**[Live app](https://eating-the-cats.vercel.app/)** · [Solution and submission](docs/SUBMISSION.md) · [Architecture and API overview](docs/ARCHITECTURE.md) · [Two-minute demo script](docs/DEMO-SCRIPT.md) · [Five-minute pitch](docs/FINALIST-PITCH.md)
+
+![Technical architecture](docs/assets/architecture.png)
+
+The diagram's "any language" label means automatic detection of supported languages, not universal language support. Session support is Supported / (Supported + Contradicted), with unresolved claims and coverage shown separately. Speaker labels are manual. The app does not rate personal honesty.
 
 A mobile-friendly live fact-checking prototype using ElevenLabs Realtime Scribe, Nemotron through Nebius Token Factory, and Tavily search. The current app is plain browser JavaScript with Node serverless handlers; it has no build dependencies.
 
@@ -25,7 +30,7 @@ Run `node --env-file-if-exists=.env.local server.mjs`, then open http://127.0.0.
 3. Streaming requests first extract complete claims and display them immediately. Each queued batch then goes to Nemotron. It can call Tavily search up to three times, inspect numbered excerpts, and return up to three assessed claims. Actual search queries stream into the research activity panel.
 4. The server validates claim fields, verdicts and citation IDs. Unsupported citations reject the response; uncited claims become Unverified. Source links and expandable search excerpts appear in the evidence feed.
 
-Manual input is separate from the live transcript. Failed and cancelled batches remain pending; use **Retry pending research** or copy the retained text. There is no automatic retry of failed paid calls. Cancel research does not stop the microphone; stop listening separately. Reset is available when recording and research are inactive. Display mode hides editing controls and enlarges evidence cards.
+Manual input is separate from the live transcript. Failed and cancelled batches remain pending; use **Retry pending research** or copy the retained text. Temporary failures can retry twice automatically (after approximately 3 and 9 seconds); retries consume the research-request allowance and may incur provider charges. Cancel research does not stop the microphone; stop listening separately. Reset is available when recording and research are inactive. Display mode hides editing controls and enlarges evidence cards.
 
 ## Limits and privacy
 
@@ -50,17 +55,17 @@ Import the repository as an Other-framework project. Serve `public` as configure
 
 Live, Evidence and Panel views share a persistent recording control. Pause and wait for the final transcript before changing the manual speaker label. Speaker A/B buttons and custom labels associate future text with that label; this is not automatic diarization. The same statement by different speakers is retained separately. Panel counts are evidence categories, never an honesty rating.
 
-A configurable 20/50/100 research-request allowance pauses automatic research when reached, including failed attempts. It is a tab-level convenience, not a dollar budget or security boundary. Server rate limits and provider budgets still apply. No paid provider retries occur automatically.
+A configurable 20/50/100 research-request allowance pauses automatic research when reached, including failed attempts. It is a tab-level convenience, not a dollar budget or security boundary. Server rate limits and provider budgets still apply. Temporary failures can trigger bounded automatic retries; use Pause checks to stop queued research.
 
 ## Parallel research
 
 Streaming checks research up to two extracted claims concurrently and emit each validated assessment immediately. Searches requested together within a claim's tool round also run concurrently. The batch still has at most three Tavily searches: three for one claim, two plus one for two claims, or one each for three claims. This bounds search cost but leaves less room for follow-up evidence when a batch has several claims; insufficient evidence must remain Unverified or Needs Context. Model-call counts may increase for multi-claim batches.
 
-Each claim has its own evidence IDs, remapped when assembling the final batch response. Successful partial results are shown and cached for five minutes even if another claim fails. Failed batches stay queued for explicit retry; completed claims can reuse that cache. The 52-second overall deadline and cancellation signal cover all workers. This reduces waiting between independent work; it does not guarantee provider latency or a fixed speedup.
+Each claim has its own evidence IDs, remapped when assembling the final batch response. Successful partial results are shown and cached for five minutes even if another claim fails. Failed batches remain queued for bounded automatic retry or manual recovery; completed claims can reuse that cache. The 52-second overall deadline and cancellation signal cover all workers. This reduces waiting between independent work; it does not guarantee provider latency or a fixed speedup.
 
 ## Long conversations and coverage
 
-Input is split into sections of at most 1,200 characters, preferring sentence or word boundaries. Each section remains in the coverage ledger, including repeated sections linked to the original. The last 600 characters of preceding context help extraction resolve references; context is not new material to check.
+Input is split into sections of at most 700 characters, preferring sentence or word boundaries. Each section remains in the coverage ledger, including repeated sections linked to the original. The last 1,200 characters of preceding context help extraction resolve references; context is not new material to check.
 
 Extraction requests all claims. If more than three are detected, the API returns the complete `deferred` list and the client queues groups of up to three, each with the original section as context. Each group retains the three-search cap; therefore a long section can cost more than three searches overall. Request allowances still pause the queue without deleting pending groups. Truncated or invalid extraction, including more than 30 claims in one section, fails visibly rather than returning a truncated list. JSON clients must also process the `deferred` field.
 
@@ -75,3 +80,4 @@ The English Live view shows one published assessment, current detection, a three
 ### Continuous single-speaker listening
 
 The default live view prioritizes detection, transcript, and evidence. Optional speaker controls are collapsed inside session settings. Finalized speech is queued at sentence boundaries, with an eight-second maximum wait for an unfinished tail; stopping flushes the tail. Research sections are capped at 700 characters and receive up to 1,200 characters of recent same-speaker context. The extraction prompt can recover assertions completed across section boundaries. During continuous partial speech, an audio chunk requests a commit after 20 seconds without a final transcript. Natural VAD commits reset this deadline. This bounds the request cadence, not provider response latency. Recognition and claim recall are not guaranteed; failed research and request limits remain visible and retryable. Smaller sections can consume the existing research allowance faster.
+
