@@ -40,3 +40,13 @@ test('Deferred claims stay queued when the request allowance is exhausted',async
  vm.runInContext("queue.enqueue('Original section','A')",b.context);await vm.runInContext('drainResearch()',b.context);
  assert.equal(vm.runInContext('queue.items.length',b.context),2);assert.equal(vm.runInContext('queue.sections[0].status',b.context),'Claims queued');assert.equal(vm.runInContext('queue.items.flatMap(x=>x.selectedClaims).length',b.context),4);assert.equal(vm.runInContext('queue.paused',b.context),true);
 });
+test('New results do not displace the card being read until explicitly revealed',async()=>{
+ const b=await browser();
+ const result=name=>({claims:[{claim:name,verdict:'Supported',explanation:'Test evidence',source_ids:[]}],sources:[],searches:[],checkedAt:new Date().toISOString()});
+ b.context.firstResult=result('First');b.context.secondResult=result('Second');
+ vm.runInContext("render(firstResult,'A');render(secondResult,'A')",b.context);
+ assert.equal(b.get('feed').children.length,1);assert.equal(vm.runInContext('pendingCards.length',b.context),1);
+ b.get('new-results').onclick();assert.equal(b.get('feed').children.length,2);assert.equal(vm.runInContext('pendingCards.length',b.context),0);
+ b.get('verdict-filter').value='Contradicted';b.get('verdict-filter').onchange();assert.ok(b.get('feed').children.every(c=>c.hidden));
+ b.views[0].onclick();assert.ok(b.get('feed').children.every(c=>!c.hidden));
+});

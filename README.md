@@ -67,3 +67,7 @@ Extraction requests all claims. If more than three are detected, the API returns
 Coverage distinguishes waiting, researching, partial results, assessed, no checkable claim detected, grouped work, duplicates, cancellation and failure. Assessed means the detected claims were processed, not that the extraction was exhaustive or that the claims are true. The ledger is included in device saving and exports. No model-based extraction can guarantee every implied or ambiguous claim is detected.
 
 The transcript shows a short tail preview with an expandable full transcript. Result cards are expandable, with the initial result open and later cards compact; no automatic scrolling is introduced.
+
+## Focused interface
+
+The German Live view shows one published assessment, current detection, a three-line transcript preview and section progress. Detailed research is collapsed. The Results view shows the complete published feed with verdict filters; Speaker view keeps comparisons separate. Incoming cards are buffered behind a new-results button so reading is not interrupted. They are still included immediately in session history, counts, saving and export. Reset is in session settings. Provider-originated diagnostic messages may retain their original language.
