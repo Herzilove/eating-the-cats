@@ -87,6 +87,7 @@ $('reset').onclick=()=>{if(busy||recording||stopping)return;history=[];speakerSt
 $('display').onclick=()=>{const enabled=document.body.classList.toggle('display-mode');$('display').textContent=enabled?'Exit display mode':'Display mode';$('display').setAttribute('aria-pressed',String(enabled));};
 refresh();
 function showTranscript(partial=''){$('transcript').textContent=[committedText,partial].filter(Boolean).join(' ').slice(-6000);$('transcript').scrollTop=$('transcript').scrollHeight;}
+async function startupStep(promise,milliseconds,error){let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(error)),milliseconds);})]);}finally{clearTimeout(timer);}}
 function cleanupAudio(){stream?.getTracks().forEach(t=>t.stop());stream=null;sourceNode?.disconnect();pcmNode?.disconnect();muteNode?.disconnect();if(audioContext&&audioContext.state!=='closed')audioContext.close().catch(()=>{});audioContext=null;}
 function stop(){
  if(recordingStarted){recordedMs+=Date.now()-recordingStarted;recordingStarted=0;}recording=false;stopping=true;clearTimeout(reconnectTimer);clearTimeout(stopTimer);cleanupAudio();const old=socket;socket=null;
@@ -106,11 +107,18 @@ async function startLive(){
  const id=++sessionId;recording=true;refresh();$('mic').textContent='■ Stop listening';$('live').textContent='CONNECTING';message('Connecting to ElevenLabs live transcription…');
  try{
   const Context=window.AudioContext||window.webkitAudioContext;if(!Context||!navigator.mediaDevices?.getUserMedia)throw Error('Live recording requires HTTPS and a supported browser.');
-  audioContext=new Context({sampleRate:16000});await audioContext.resume();
-  const localStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,channelCount:1}});
+  message('Allow microphone access in your browser. Waiting for permission…');
+  const microphone=navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,channelCount:1}});
+  microphone.then(media=>{if(!recording||id!==sessionId)media.getTracks().forEach(track=>track.stop());},()=>{});
+  const localStream=await startupStep(microphone,25000,'Microphone permission did not arrive. Allow microphone access in the browser site settings. If you are in an embedded browser, open this page in Chrome or Edge.');
   if(!recording||id!==sessionId){localStream.getTracks().forEach(t=>t.stop());return;}stream=localStream;
+  message('Starting microphone audio…');
+  const context=new Context({sampleRate:16000});audioContext=context;
+  await startupStep(context.resume(),8000,'This browser did not enable audio capture. Open the app in Chrome or Edge and allow the microphone.');
+  if(!recording||id!==sessionId){await context.close().catch(()=>{});return;}
+  message('Requesting a secure transcription connection…');
   const {token}=await post('/api/scribe-token',{});if(!recording||id!==sessionId)return;
-  await audioContext.audioWorklet.addModule('/pcm-worklet.js');if(!recording||id!==sessionId)return;
+  await startupStep(audioContext.audioWorklet.addModule('/pcm-worklet.js'),10000,'Audio processing could not load. Reload the page and try again.');if(!recording||id!==sessionId)return;
   const rate=audioContext.sampleRate;audioRate=rate;const url=new URL('wss://api.elevenlabs.io/v1/speech-to-text/realtime');url.search=new URLSearchParams({model_id:'scribe_v2_realtime',token,audio_format:`pcm_${rate}`,commit_strategy:'vad',vad_silence_threshold_secs:'0.7'});
   const ws=new WebSocket(url);socket=ws;showTranscript();
   const connectionTimer=setTimeout(()=>{if(ws.readyState===WebSocket.CONNECTING){message('Live connection timed out. Please retry.');stop();}},15000);
@@ -118,7 +126,7 @@ async function startLive(){
   ws.onmessage=event=>{if(id!==sessionId)return;let data;try{data=JSON.parse(event.data);}catch{return;}if(data.message_type==='partial_transcript'){showTranscript(data.text||'');}else if(data.message_type==='committed_transcript'){const text=(data.text||'').trim();if(text){committedText=[committedText,text].filter(Boolean).join(' ');pendingText=[pendingText,text].filter(Boolean).join(' ');persist();showTranscript();scheduleResearch();}}else if(/error|exceeded|rate_limited|throttled|unaccepted|overflow|exhausted/.test(data.message_type||'')){message(`ElevenLabs: ${data.error||data.message_type}. Check Speech to Text access and credits.`);stop();}};
   ws.onerror=()=>{if(id===sessionId){message('ElevenLabs live connection failed. Check Speech to Text permissions and credits.');stop();}};
   ws.onclose=()=>{clearTimeout(connectionTimer);if(id===sessionId&&recording){gaps.push(new Date().toISOString());message('Connection lost. A gap was recorded. Press Start listening to resume.');stop();reconnect();}};
- }catch(error){if(id===sessionId){message(error.message||'Could not start microphone.');stop();}}
+ }catch(error){if(id===sessionId){const errors={NotAllowedError:'Microphone access was blocked. Allow the microphone in your browser site settings, then try again.',NotFoundError:'No microphone was found. Connect or enable a microphone and try again.',NotReadableError:'The microphone is unavailable or being used by another app. Close the other recording app and retry.'};message(errors[error.name]||error.message||'Could not start microphone.');stop();}}
 }
 $('mic').onclick=()=>{if(recording)stop();else startLive();};
 fetch('/api/status').then(r=>r.json()).then(s=>{$('access').hidden=!s.accessRequired;for(const [key,label] of [['nebius','Token Factory'],['tavily','Tavily'],['elevenlabs','ElevenLabs']]){const span=document.createElement('span');span.textContent=`${s[key]?'●':'○'} ${label}: ${s[key]?'configured':'missing'}`;$('services').append(span);}message('Configuration indicators do not verify API access. First live use will consume provider credits.');}).catch(()=>message('Could not read service configuration.'));

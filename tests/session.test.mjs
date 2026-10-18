@@ -19,3 +19,17 @@ test('Device restore retains duration, speaker and pending text without spending
  assert.equal(b.get('duration').value,'90');assert.equal(b.get('speaker').value,'Speaker B');assert.equal(vm.runInContext('queue.current.text',b.context),'A pending claim');assert.equal(vm.runInContext('queue.paused',b.context),true);assert.equal(b.fetches(),before);
 });
 test('Research allowance stops queued work before a provider call',async()=>{const b=await browser();vm.runInContext("requests=20;queue.enqueue('A claim','A');",b.context);const before=b.fetches();await vm.runInContext('drainResearch()',b.context);assert.equal(b.fetches(),before);assert.equal(vm.runInContext('queue.items.length',b.context),1);assert.equal(vm.runInContext('queue.paused',b.context),true);});
+test('Microphone permission is requested before constructing audio and errors release the controls',async()=>{
+ const b=await browser();let contexts=0;
+ b.context.window.AudioContext=class{constructor(){contexts++;}};
+ b.context.navigator={mediaDevices:{getUserMedia:async()=>{const error=new Error('denied');error.name='NotAllowedError';throw error;}}};b.context.WebSocket={OPEN:1};
+ const before=b.fetches();await vm.runInContext('startLive()',b.context);
+ assert.equal(contexts,0);assert.equal(b.fetches(),before);assert.match(b.get('message').textContent,/Microphone access was blocked/);assert.equal(vm.runInContext('recording',b.context),false);
+});
+test('Late microphone permission after cancellation immediately closes the tracks',async()=>{
+ const b=await browser();let grant,stopped=0;
+ b.context.window.AudioContext=class{};b.context.WebSocket={OPEN:1};
+ b.context.navigator={mediaDevices:{getUserMedia:()=>new Promise(resolve=>{grant=resolve;})}};
+ const start=vm.runInContext('startLive()',b.context);vm.runInContext('stop()',b.context);grant({getTracks:()=>[{stop(){stopped++;}}]});await start;
+ assert.ok(stopped>=1);assert.equal(vm.runInContext('recording',b.context),false);
+});
