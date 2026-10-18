@@ -100,3 +100,28 @@ test('Claim support excludes unresolved and pending claims and has no empty-sess
  b.get('reset').onclick();assert.equal(b.get('support-score').textContent,'—');
  vm.runInContext("counts.Unverified=5;refresh();",b.context);assert.equal(b.get('support-score').textContent,'—');
 });
+
+test('A failed section does not block later sections; retries are delayed and bounded',async()=>{
+ const b=await browser();const calls=[];
+ b.context.fetch=async(path,options)=>{
+  const text=JSON.parse(options.body).text;calls.push(text);
+  if(text==='Fails')throw Error('Temporary failure');
+  let sent=false;const bytes=new TextEncoder().encode(JSON.stringify({type:'result',data:{claims:[],sources:[],searches:[],checkedAt:new Date().toISOString()}})+'\n');
+  return {ok:true,body:{getReader:()=>({read:async()=>sent?{done:true}:(sent=true,{done:false,value:bytes}),releaseLock(){}})}};
+ };
+ vm.runInContext("queue.enqueue('Fails');queue.enqueue('Succeeds');",b.context);await vm.runInContext('drainResearch()',b.context);
+ assert.deepEqual(calls,['Fails','Succeeds']);assert.equal(vm.runInContext('queue.paused',b.context),false);
+ assert.equal(vm.runInContext('queue.items[0].status',b.context),'Retry scheduled');assert.match(b.get('support-coverage').textContent,/1 \/ 2 sections processed · incomplete/);
+ for(let attempt=0;attempt<2;attempt++){vm.runInContext('queue.items[0].retryAt=0',b.context);await vm.runInContext('drainResearch()',b.context);}
+ assert.equal(calls.filter(x=>x==='Fails').length,3);assert.equal(vm.runInContext('queue.items[0].retryBlocked',b.context),true);
+ await vm.runInContext('drainResearch()',b.context);assert.equal(calls.length,4);
+ assert.equal(b.get('retry').hidden,false);
+});
+test('Coverage includes deferred groups and repeated sections only after completion',()=>{
+ const q=new ResearchQueue();q.enqueue('Original');q.enqueue('Original');const parent=q.current;parent.status='Claims queued';q.acknowledge(parent);q.enqueueClaims(parent.text,'',['A','B','C','D'],parent.id);
+ assert.deepEqual(q.coverage(),{total:2,done:0});q.items[0].status='Assessed';assert.equal(q.coverage().done,0);q.items[1].status='Assessed';assert.deepEqual(q.coverage(),{total:2,done:2});
+});
+test('Permanent failures require manual retry and acknowledgement removes the active item',()=>{
+ const q=new ResearchQueue();q.enqueue('First');q.enqueue('Second');const first=q.current;q.fail(first,false);const second=q.current;
+ assert.equal(second.text,'Second');assert.equal(q.retryDelay,null);q.retryFailed();q.acknowledge(second);assert.equal(q.items[0],first);assert.equal(first.failures,0);
+});

@@ -3,7 +3,7 @@ const $=id=>document.getElementById(id);
 let busy=false,recording=false,stopping=false,stream,stopTimer,socket,audioContext,sourceNode,pcmNode,muteNode;
 let committedText='',pendingText='',researchTimer,sessionId=0,audioRate=16000,requestController;
 const queue=new ResearchQueue(),seenClaims=new Set();
-let pendingCards=[];
+let pendingCards=[],retryTimer;
 let lastCommitAt=0,partialSpeech='',pendingSince=0;
 const uiLabels={};
 const label=value=>uiLabels[value]||value;
@@ -35,6 +35,8 @@ const message=s=>$('message').textContent=s;
 const headers=()=>({'Content-Type':'application/json'});
 async function post(path,body){const r=await fetch(path,{method:'POST',headers:headers(),body:JSON.stringify(body),signal:AbortSignal.timeout(20000)});const data=await r.json();if(!r.ok)throw Error(data.error||'Request failed');return data;}
 function refreshSupport(){
+ const coverage=queue.coverage();
+ $('support-coverage').textContent=coverage.done+' / '+coverage.total+' sections processed'+(coverage.done<coverage.total||pendingText.trim()?' · incomplete':'');
  const supported=counts.Supported,contradicted=counts.Contradicted,decisive=supported+contradicted;
  const unresolved=counts['Needs Context']+counts.Unverified;
  $('support-score').textContent=decisive?Math.round(100*supported/decisive)+'%':'—';
@@ -53,10 +55,10 @@ function refresh(){
  $('pending').textContent=`${queue.items.length} research groups pending`;
  $('capture-status').textContent=pendingText.trim()?'Finishing the current sentence…':recording?'Listening · checking continues in the background': 'Ready for one speaker';
  if(queue.items.length>2)$('progress-line').textContent+=' · catching up; transcript retained';
- $('retry').hidden=!queue.paused;
- $('cancel').disabled=!busy;
+ $('retry').hidden=busy||!(queue.paused||queue.items.some(item=>item.retryBlocked));
+ $('cancel').disabled=!busy;$('cancel').hidden=!busy;
  $('reset').disabled=busy||recording||stopping;
- $('recovery').hidden=!queue.paused;
+ $('recovery').hidden=!(queue.paused||queue.items.some(item=>item.retryBlocked));
  $('saved-text').value=queue.items.map(x=>x.text).join('\n\n');
 }
 function activity(phase,text){
@@ -86,23 +88,29 @@ function render(data,speaker,remember=true){
 }
 async function research(text,signal,onClaim=()=>{},selectedClaims,context){
  const response=await fetch('/api/check',{method:'POST',headers:{...headers(),Accept:'application/x-ndjson'},body:JSON.stringify({text,selectedClaims,context}),signal});
- if(!response.ok){const data=await response.json();throw Error(data.error||'Request failed');}
+ if(!response.ok){const data=await response.json();const error=Error(data.error||'Request failed');error.retryable=response.status===429||response.status>=500&&response.status!==503;throw error;}
  const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',result;
  const consume=line=>{if(!line.trim())return;const event=JSON.parse(line);if(event.type==='error')throw Error(event.error);if(event.type==='activity'){activity(event.phase,event.message);$('pending-phase')?.replaceChildren(document.createTextNode(label(event.phase)));}if(event.type==='claims')showPending(event.claims.join(' • '),'Searching');if(event.type==='sources'){for(const source of event.sources){const u=new URL(source.url);if(!['http:','https:'].includes(u.protocol))continue;const a=document.createElement('a');a.href=u.href;a.rel='noopener noreferrer';a.target='_blank';a.textContent=source.title;$('inflight').firstChild?.append(a);}}if(event.type==='claim_result'){onClaim(event.data);activity('Assessing','A claim is ready; remaining research continues.');}if(event.type==='claim_error')activity('Retry needed',event.error);if(event.type==='result')result=event.data;};
  try{while(true){const {value,done}=await reader.read();buffer+=decoder.decode(value,{stream:!done});let end;while((end=buffer.indexOf('\n'))>=0){consume(buffer.slice(0,end));buffer=buffer.slice(end+1);}if(done)break;}consume(buffer);}finally{reader.releaseLock();}
  if(!result)throw Error('Research connection ended before a result arrived.');return result;
 }
 async function drainResearch(){
+ clearTimeout(retryTimer);retryTimer=null;
  clearTimeout(researchTimer);researchTimer=null;
  flushTranscript();
  if(busy||queue.paused){refresh();return;}
  while(queue.current&&!queue.paused){
   if(requests>=Number($('budget').value)){queue.current.status='Waiting — request limit';queue.paused=true;message('Research allowance reached. Increase the limit, then retry.');refresh();break;}
   requests++;busy=true;requestController=new AbortController();const deadline=setTimeout(()=>requestController.abort(),57000);const item=queue.current;item.status='Researching';refresh();showPending(item.text,'Detecting');message('Researching the next transcript batch…');
-  try{const data=await research(item.text,requestController.signal,partial=>{item.status='Partial results';render(partial,item.speaker);},item.selectedClaims,item.context);render(data,item.speaker);item.status=data.deferred?.length?'Claims queued':data.claims.length?'Assessed':'No checkable claim detected';queue.acknowledge();if(data.deferred?.length)queue.enqueueClaims(item.text,item.speaker,data.deferred,item.id);$('inflight').replaceChildren();activity('Complete',data.claims.length?'Assessment complete. Review the linked evidence.':'No checkable claims found.');message('Assessment complete.');}
-  catch(e){item.status=e.name==='AbortError'?'Cancelled — retry needed':'Failed — retry needed';showPending(queue.current?.text||'','Paused — text retained');queue.paused=true;activity('Paused','Your transcript is retained for retry.');message(e.name==='AbortError'?'Research cancelled or timed out. Pending text is kept.':e.message);}
+  try{const data=await research(item.text,requestController.signal,partial=>{item.status='Partial results';render(partial,item.speaker);},item.selectedClaims,item.context);render(data,item.speaker);item.status=data.deferred?.length?'Claims queued':data.claims.length?'Assessed':'No checkable claim detected';queue.acknowledge(item);if(data.deferred?.length)queue.enqueueClaims(item.text,item.speaker,data.deferred,item.id);$('inflight').replaceChildren();activity('Complete',data.claims.length?'Assessment complete. Review the linked evidence.':'No checkable claims found.');message('Assessment complete.');}
+  catch(e){
+   if(queue.paused){item.status='Cancelled — retry needed';}
+   else{queue.fail(item,e.retryable!==false);activity('Retry needed',item.retryBlocked?'Section retained for manual retry. Other sections continue.':'Temporary failure. This section will retry automatically; other sections continue.');}
+   $('inflight').replaceChildren();message(queue.paused?'Research paused. Text is retained.':item.retryBlocked?'A section needs retry. Other checks continue.':'Retry scheduled. Other checks continue.');
+  }
   finally{clearTimeout(deadline);busy=false;requestController=null;refresh();}
  }
+ if(!queue.paused&&queue.retryDelay!==null)retryTimer=setTimeout(drainResearch,queue.retryDelay);
 }
 function flushTranscript(force=false){
  const text=pendingText.trim();if(!text)return;
@@ -113,9 +121,9 @@ function flushTranscript(force=false){
 }
 function scheduleResearch(){if(!researchTimer)researchTimer=setTimeout(()=>{researchTimer=null;drainResearch();},1200);}
 $('check').onclick=()=>{const text=$('text').value.trim();if(!text){message('Enter a factual statement first.');return;}queue.enqueue(text,$('speaker').value);drainResearch();};
-$('retry').onclick=()=>{queue.paused=false;drainResearch();};
-$('cancel').onclick=()=>{queue.paused=true;requestController?.abort();};
-$('reset').onclick=()=>{if(busy||recording||stopping)return;pendingCards=[];history=[];speakerStats={};recordedMs=0;requests=0;gaps=[];reconnects=0;clearTimeout(reconnectTimer);clearTimeout(researchTimer);researchTimer=null;queue.reset();seenClaims.clear();for(const key in counts)counts[key]=0;pendingText='';pendingSince=0;partialSpeech='';committedText='';showTranscript();$('feed').replaceChildren();$('activity').replaceChildren();$('phase').textContent='Ready';refresh();message('Session cleared.');};
+$('retry').onclick=()=>{if(busy)return;queue.retryFailed();drainResearch();};
+$('cancel').onclick=()=>{clearTimeout(retryTimer);queue.paused=true;requestController?.abort();};
+$('reset').onclick=()=>{if(busy||recording||stopping)return;clearTimeout(retryTimer);pendingCards=[];history=[];speakerStats={};recordedMs=0;requests=0;gaps=[];reconnects=0;clearTimeout(reconnectTimer);clearTimeout(researchTimer);researchTimer=null;queue.reset();seenClaims.clear();for(const key in counts)counts[key]=0;pendingText='';pendingSince=0;partialSpeech='';committedText='';showTranscript();$('feed').replaceChildren();$('activity').replaceChildren();$('phase').textContent='Ready';refresh();message('Session cleared.');};
 $('display').onclick=()=>{const enabled=document.body.classList.toggle('display-mode');$('display').textContent=enabled?'Exit display mode':'Display mode';$('display').setAttribute('aria-pressed',String(enabled));};
 refresh();
 function shouldCommitSpeech(){return !!partialSpeech.trim()&&Date.now()-lastCommitAt>=20000;}
@@ -172,7 +180,7 @@ async function startLive(){
 }
 $('mic').onclick=()=>{if(recording)stop();else startLive();};
 fetch('/api/status').then(r=>r.json()).then(s=>{for(const [key,label] of [['nebius','Token Factory'],['tavily','Tavily'],['elevenlabs','ElevenLabs']]){const span=document.createElement('span');span.textContent=`${s[key]?'●':'○'} ${label}: ${s[key]?'configured':'missing'}`;$('services').append(span);}if($('message').textContent==='Checking service configuration…')message('');}).catch(()=>message('Could not read service configuration.'));
-window.addEventListener('pagehide',()=>{stop();requestController?.abort();});
+window.addEventListener('pagehide',()=>{queue.paused=true;clearTimeout(retryTimer);stop();requestController?.abort();});
 document.querySelectorAll('button[data-view]').forEach(button=>{
  button.onclick=()=>{document.body.dataset.view=button.dataset.view;if(button.dataset.view==='live'){$('verdict-filter').value='all';applyFilter();}document.querySelectorAll('button[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));};
 });
