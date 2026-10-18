@@ -27,3 +27,5 @@ body[data-view=live] .overview,body[data-view=live] .services,body[data-view=liv
 .support-parameters>button{color:var(--ink);border:1px solid transparent;cursor:pointer;min-width:0}.support-parameters>button:hover,.support-parameters>button:focus-visible{border-color:var(--lime);outline:2px solid var(--lime);outline-offset:2px}.result-filter{scroll-margin-top:100px}#feed:focus-visible{outline:2px solid var(--lime);outline-offset:4px}
 
 .session-summary{margin:14px 0}.session-summary>summary{font-size:14px}.session-summary pre{white-space:pre-wrap;overflow-wrap:anywhere;font-family:inherit;font-size:13px;line-height:1.6;max-height:350px;overflow:auto}.session-summary .actions{flex-wrap:wrap}.session-summary button{font-size:12px}.session-summary .fine{font-size:12px}
+
+.practice-link{color:var(--ink,#f2efdf);text-decoration:none;padding:10px 12px;white-space:nowrap}header{flex-wrap:wrap}

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Eating the Cats · Demo teleprompter</title>
+<style>
+:root{color-scheme:dark;font-family:Arial,sans-serif;background:#0b1711;color:#f3f1e5}*{box-sizing:border-box}body{margin:0}header{position:fixed;inset:0 0 auto;background:#0b1711f5;border-bottom:1px solid #425044;padding:12px 20px;z-index:2;display:flex;align-items:center;gap:14px;flex-wrap:wrap}button{font:600 16px Arial;padding:10px 18px;border:1px solid #65745e;border-radius:7px;background:#233126;color:#f3f1e5;cursor:pointer}#start{background:#d7f87b;color:#15200c}label{font-size:14px;display:flex;align-items:center;gap:8px}input{width:100px}#time{font:600 24px monospace;margin-left:auto}#viewport{height:100dvh;overflow-y:auto;scroll-behavior:auto;padding:calc(var(--toolbar-height, 110px) + 22px) 8vw 0}article{max-width:1050px;margin:auto;font-size:clamp(30px,4vw,48px);line-height:1.45}p{margin:0 0 1em}.cue{font-size:.45em;letter-spacing:.08em;text-transform:uppercase;color:#d7f87b;margin:1.6em 0 .7em}strong{color:#d7f87b;font-weight:600}.end{padding-bottom:65vh}#progress{position:fixed;bottom:0;left:0;height:5px;background:#d7f87b;width:0;z-index:3}@media(max-width:600px){#viewport{padding:calc(var(--toolbar-height, 150px) + 22px) 6vw 0}header{gap:8px}#time{font-size:20px}article{font-size:30px}}@media print{header,#progress{display:none}#viewport{height:auto;overflow:visible;padding:0}article{font-size:20px;color:#000}.cue,strong{color:#333}.end{padding:0}}
+.back{color:#d7f87b;text-decoration:none;padding:10px 0}button{min-height:44px}input[type=range]{min-height:36px}header{padding-top:max(12px,env(safe-area-inset-top))}
+</style></head><body>
+<header><a href="/" class="back">← App</a><button id="start">▶ Start 2:00</button><button id="reset">↺ Reset</button><label>Text size <input id="size" type="range" min="30" max="68" value="48"></label><label><input id="mirror" type="checkbox" style="width:auto"> Mirror</label><span id="time" aria-live="off">02:00</span></header>
+<div id="viewport"><article id="script">
+<div class="cue">0:00 · Main page · App microphone paused — read white text only</div>
+<p>Our name, Eating the Cats, refers to Trump’s false claim about immigrants eating pets in Springfield during the 2024 debate.</p>
+<p>But questionable claims also happen between friends. Imagine a friend casually saying this:</p>
+<div class="cue">0:20 · Click Start listening · Fictional friendly conversation — short pauses between claims</div>
+<p>You know, I really like penguins. <strong>They can fly somewhere cold whenever life gets stressful.</strong> Honestly, that sounds ideal.</p>
+<p>Although an octopus would be pretty good too. <strong>They have three hearts.</strong> Imagine getting all three broken by the same person.</p>
+<p>I’d rather be a goldfish. <strong>Their memory only lasts three seconds,</strong> so I’d forget my ex before finishing this sentence.</p>
+<p>Oh, and <strong>butterflies taste with their feet.</strong> Imagine reviewing a restaurant just by walking in.</p>
+<p>And <strong>wombats produce cube-shaped poop.</strong> Tell me that doesn’t sound like a LEGO partnership.</p>
+<div class="cue">1:05 · Pause app listening · Open View research</div>
+<p>ElevenLabs provides the live transcript.</p>
+<p><strong>NVIDIA Nemotron on Nebius Token Factory</strong> extracts claims and decides what to investigate.</p>
+<p><strong>Tavily retrieves web evidence.</strong> Nemotron evaluates it and produces cited assessments.</p>
+<p>The conversation continues while research runs.</p>
+<div class="cue">1:25 · Open one completed result and its source · Describe only actual results</div>
+<p>Each result shows the claim, an explanation, and sources we can inspect.</p>
+<p>We distinguish supported, contradicted, context-dependent, and unverified statements.</p>
+<p>The support summary excludes unresolved claims. <strong>It is not a rating of anyone’s honesty.</strong></p>
+<div class="cue">1:45 · Briefly show coverage · Return to results</div>
+<p>Users can track pending checks, limit research, and export their session.</p>
+<p>The app is live, and the code is open source.</p>
+<p class="end"><strong>We don’t ask you to trust the microphone.<br>We show the receipts.</strong></p>
+</article></div><div id="progress"></div>
+<script>
+const viewport=document.getElementById('viewport'),script=document.getElementById('script'),start=document.getElementById('start'),time=document.getElementById('time'),progress=document.getElementById('progress');
+new ResizeObserver(entries=>document.documentElement.style.setProperty('--toolbar-height',entries[0].target.offsetHeight+'px')).observe(document.querySelector('header'));
+let elapsed=0,running=false,last=0,frame;const duration=120000;
+// Cue positions anchor each section to its intended time rather than assuming equal paragraph heights.
+function position(ms){const cues=[...script.querySelectorAll('.cue')];const times=[0,20000,65000,85000,105000,120000];const points=cues.map(c=>c.offsetTop-script.offsetTop);const end=script.querySelector('.end');points.push(Math.max(0,end.offsetTop-script.offsetTop-viewport.clientHeight*.38));let i=0;while(i<times.length-2&&ms>times[i+1])i++;const fraction=Math.min(1,Math.max(0,(ms-times[i])/(times[i+1]-times[i])));return Math.max(0,points[i]+(points[i+1]-points[i])*fraction);}
+function display(){const remaining=Math.max(0,Math.ceil((duration-elapsed)/1000));time.textContent=String(Math.floor(remaining/60)).padStart(2,'0')+':'+String(remaining%60).padStart(2,'0');progress.style.width=(elapsed/duration*100)+'%';viewport.scrollTop=position(elapsed);}
+function tick(now){if(!running)return;elapsed=Math.min(duration,elapsed+now-last);last=now;display();if(elapsed>=duration){running=false;start.textContent='✓ Finished';return;}frame=requestAnimationFrame(tick);}
+function toggle(){if(running){running=false;cancelAnimationFrame(frame);start.textContent='▶ Resume';return;}if(elapsed>=duration)elapsed=0;running=true;last=performance.now();start.textContent='Ⅱ Pause';frame=requestAnimationFrame(tick);}
+start.onclick=toggle;document.getElementById('reset').onclick=()=>{running=false;cancelAnimationFrame(frame);elapsed=0;start.textContent='▶ Start 2:00';display();};
+document.getElementById('size').oninput=e=>{script.style.fontSize=e.target.value+'px';display();};document.getElementById('mirror').onchange=e=>script.style.transform=e.target.checked?'scaleX(-1)':'';
+document.addEventListener('keydown',e=>{if(e.code==='Space'&&!['INPUT','BUTTON'].includes(e.target.tagName)){e.preventDefault();toggle();}});
+window.addEventListener('resize',()=>{if(elapsed>0)display();});
+</script></body></html>
+
+
