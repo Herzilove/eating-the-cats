@@ -4,7 +4,7 @@ let busy=false,recording=false,stopping=false,stream,stopTimer,socket,audioConte
 let committedText='',pendingText='',researchTimer,sessionId=0,audioRate=16000,requestController;
 const queue=new ResearchQueue(),seenClaims=new Set();
 let history=[],speakerStats={},recordedMs=0,recordingStarted=0,requests=0,gaps=[],reconnects=0,reconnectTimer;
-function reconnect(){if(!$('reconnect').checked||reconnects>=3)return;reconnects++;message('Connection interrupted. Reconnecting; some speech may be missing.');reconnectTimer=setTimeout(()=>startLive(),2000);}
+function reconnect(){if(!$('reconnect').checked||reconnects>=3)return;reconnects++;message('Connection interrupted. Reconnecting; some speech may be missing.');reconnectTimer=setTimeout(()=>{if($('reconnect').checked&&!recording)startLive();},2000);}
 const storageKey='eating-the-cats-session-v1';
 function persist(){if(!$('save-local').checked)return;try{localStorage.setItem(storageKey,JSON.stringify({version:1,history,committedText,pendingText,items:queue.items,completed:[...queue.completed],recordedMs:recordedMs+(recordingStarted?Date.now()-recordingStarted:0),requests,gaps,speaker:$('speaker').value,duration:$('duration').value,budget:$('budget').value}));}catch{message('Device storage is full or unavailable. Export your session before closing.');}}
 function updateSession(){
@@ -83,7 +83,7 @@ function scheduleResearch(){if(!researchTimer)researchTimer=setTimeout(()=>{rese
 $('check').onclick=()=>{const text=$('text').value.trim();if(!text){message('Enter a factual statement first.');return;}queue.enqueue(text,$('speaker').value);drainResearch();};
 $('retry').onclick=()=>{queue.paused=false;drainResearch();};
 $('cancel').onclick=()=>{queue.paused=true;requestController?.abort();};
-$('reset').onclick=()=>{if(busy||recording||stopping)return;history=[];speakerStats={};recordedMs=0;requests=0;gaps=[];reconnects=0;clearTimeout(researchTimer);researchTimer=null;queue.reset();seenClaims.clear();for(const key in counts)counts[key]=0;pendingText='';committedText='';$('transcript').textContent='';$('feed').replaceChildren();$('activity').replaceChildren();$('phase').textContent='Ready';refresh();message('Session cleared.');};
+$('reset').onclick=()=>{if(busy||recording||stopping)return;history=[];speakerStats={};recordedMs=0;requests=0;gaps=[];reconnects=0;clearTimeout(reconnectTimer);clearTimeout(researchTimer);researchTimer=null;queue.reset();seenClaims.clear();for(const key in counts)counts[key]=0;pendingText='';committedText='';$('transcript').textContent='';$('feed').replaceChildren();$('activity').replaceChildren();$('phase').textContent='Ready';refresh();message('Session cleared.');};
 $('display').onclick=()=>{const enabled=document.body.classList.toggle('display-mode');$('display').textContent=enabled?'Exit display mode':'Display mode';$('display').setAttribute('aria-pressed',String(enabled));};
 refresh();
 function showTranscript(partial=''){$('transcript').textContent=[committedText,partial].filter(Boolean).join(' ').slice(-6000);$('transcript').scrollTop=$('transcript').scrollHeight;}
@@ -99,6 +99,8 @@ function stop(){
  setTimeout(()=>{stopping=false;if(!recording){$('mic').disabled=false;refresh();}},1600);
 }
 async function startLive(){
+ clearTimeout(reconnectTimer);
+ if(recording||stopping)return;
  if(queue.paused){message('Retry or clear the pending research before recording again.');return;}
  if(recordedMs>=Number($('duration').value)*60000){message('Recording allowance reached. Increase it or reset the session.');return;}
  const id=++sessionId;recording=true;refresh();$('mic').textContent='■ Stop listening';$('live').textContent='CONNECTING';message('Connecting to ElevenLabs live transcription…');
