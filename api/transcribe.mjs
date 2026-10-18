@@ -1,4 +1,4 @@
-import {reply,guard,upstream} from './common.mjs';
+import {reply,guard,upstream} from '../lib/common.mjs';
 export default async function handler(req,res){
  if(!guard(req,res))return;
  if(!process.env.ELEVENLABS_API_KEY)return reply(res,503,{error:'ElevenLabs is not configured.'});
@@ -13,3 +13,4 @@ export default async function handler(req,res){
   return reply(res,200,{text:data.text||''});
  }catch{return reply(res,502,{error:'Transcription failed. Check ElevenLabs permissions and credits.'});}
 }
+

@@ -1,4 +1,4 @@
-import {reply,guard,upstream} from './common.mjs';
+import {reply,guard,upstream} from '../lib/common.mjs';
 export const tools=[{type:'function',function:{name:'search_web',description:'Find evidence for a factual claim. Search independently for supporting and conflicting evidence.',parameters:{type:'object',properties:{query:{type:'string'}},required:['query']}}}];
 export function safeSources(results){return results.filter(s=>{try{return ['https:','http:'].includes(new URL(s.url).protocol);}catch{return false;}}).map(s=>({title:String(s.title||s.url),url:s.url,content:String(s.content||'').slice(0,2500)}));}
 export default async function handler(req,res){
@@ -32,3 +32,4 @@ export default async function handler(req,res){
  return reply(res,200,{claims,sources:sources.map(({title,url})=>({title,url})),searches,checkedAt:new Date().toISOString()});
  }catch{return reply(res,502,{error:'Research failed. Check model tool-calling support, API access and credits; then retry a shorter claim.'});}
 }
+
