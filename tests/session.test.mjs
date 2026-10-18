@@ -50,3 +50,32 @@ test('New results do not displace the card being read until explicitly revealed'
  b.get('verdict-filter').value='Contradicted';b.get('verdict-filter').onchange();assert.ok(b.get('feed').children.every(c=>c.hidden));
  b.views[0].onclick();assert.ok(b.get('feed').children.every(c=>!c.hidden));
 });
+
+test('Continuous speech submits complete sentences and holds the unfinished tail',async()=>{
+ const b=await browser();
+ vm.runInContext("recording=true;pendingSince=Date.now();pendingText='Paris is in France. Berlin is';flushTranscript();",b.context);
+ assert.equal(vm.runInContext('queue.current.text.trim()',b.context),'Paris is in France.');
+ assert.equal(vm.runInContext('pendingText',b.context),'Berlin is');
+ vm.runInContext("pendingText+=' in Germany.';flushTranscript();",b.context);
+ assert.equal(vm.runInContext('queue.items[1].text',b.context),'Berlin is in Germany.');
+ assert.equal(vm.runInContext('pendingText',b.context),'');
+});
+test('Unpunctuated speech has a bounded wait and stopping flushes the final fragment',async()=>{
+ const b=await browser();
+ vm.runInContext("recording=true;pendingSince=Date.now()-9000;pendingText='A continuous spoken statement';flushTranscript();pendingSince=Date.now();pendingText='last words';flushTranscript(true);",b.context);
+ assert.equal(vm.runInContext('queue.items.length',b.context),2);
+ assert.equal(vm.runInContext('queue.items[1].text',b.context),'last words');
+});
+test('Continuous transcription requests finalization after twenty seconds, never for silence',async()=>{
+ const b=await browser();
+ vm.runInContext("lastCommitAt=Date.now()-21000;partialSpeech='Still speaking';",b.context);
+ assert.equal(vm.runInContext('shouldCommitSpeech()',b.context),true);
+ vm.runInContext('lastCommitAt=Date.now()',b.context);
+ assert.equal(vm.runInContext('shouldCommitSpeech()',b.context),false);
+ vm.runInContext("lastCommitAt=0;partialSpeech='';",b.context);
+ assert.equal(vm.runInContext('shouldCommitSpeech()',b.context),false);
+});
+test('Context spans recent sections but never mixes different speakers',()=>{
+ const q=new ResearchQueue();q.enqueue('The city we are discussing is Paris.','A');q.enqueue('It has','A');q.enqueue('Unrelated statement','B');q.enqueue('more than two million residents.','A');
+ assert.match(q.items.at(-1).context,/Paris/);assert.match(q.items.at(-1).context,/It has/);assert.doesNotMatch(q.items.at(-1).context,/Unrelated/);
+});

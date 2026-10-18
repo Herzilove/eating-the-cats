@@ -4,6 +4,7 @@ let busy=false,recording=false,stopping=false,stream,stopTimer,socket,audioConte
 let committedText='',pendingText='',researchTimer,sessionId=0,audioRate=16000,requestController;
 const queue=new ResearchQueue(),seenClaims=new Set();
 let pendingCards=[];
+let lastCommitAt=0,partialSpeech='',pendingSince=0;
 const uiLabels={};
 const label=value=>uiLabels[value]||value;
 function applyFilter(){const selected=$('verdict-filter').value||'all';for(const card of $('feed').children)card.hidden=selected!=='all'&&card.dataset.verdict!==selected;}
@@ -41,6 +42,8 @@ function refresh(){
  $('new-results').textContent=`${pendingCards.length} new results — show`;
  for(const [name,count] of Object.entries(counts))$(name.replaceAll(' ','-')).textContent=count;
  $('pending').textContent=`${queue.items.length} research groups pending`;
+ $('capture-status').textContent=pendingText.trim()?'Finishing the current sentence…':recording?'Listening · checking continues in the background': 'Ready for one speaker';
+ if(queue.items.length>2)$('progress-line').textContent+=' · catching up; transcript retained';
  $('retry').hidden=!queue.paused;
  $('cancel').disabled=!busy;
  $('reset').disabled=busy||recording||stopping;
@@ -67,7 +70,7 @@ function render(data,speaker,remember=true){
    const a=document.createElement('a');a.href=url.href;a.target='_blank';a.rel='noopener noreferrer';a.textContent=`[${id}] ${s.title}`;card.append(a);
    if(s.excerpt){const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='View source excerpt';const excerpt=document.createElement('p');excerpt.textContent=s.excerpt;details.append(summary,excerpt);card.append(details);}
   }
-  const meta=document.createElement('div');meta.className='meta';meta.textContent=`${speaker||'Unlabelled speaker'} · ${new Date(data.checkedAt).toLocaleTimeString()} · ${data.searches.length} searches${data.cached?' · cached result':''}`;card.append(meta);if(seenClaims.size===1){$('feed').prepend(card);}else{pendingCards.push(card);}applyFilter();
+  const meta=document.createElement('div');meta.className='meta';meta.textContent=`${speaker||'Speaker'} · ${new Date(data.checkedAt).toLocaleTimeString()} · ${data.searches.length} searches${data.cached?' · cached result':''}`;card.append(meta);if(seenClaims.size===1){$('feed').prepend(card);}else{pendingCards.push(card);}applyFilter();
  const owner=speaker||'Unknown';speakerStats[owner]??={};speakerStats[owner][c.verdict]=(speakerStats[owner][c.verdict]||0)+1;
  }
  refresh();
@@ -82,7 +85,7 @@ async function research(text,signal,onClaim=()=>{},selectedClaims,context){
 }
 async function drainResearch(){
  clearTimeout(researchTimer);researchTimer=null;
- if(pendingText.trim()){queue.enqueue(pendingText,$('speaker').value);pendingText='';}
+ flushTranscript();
  if(busy||queue.paused){refresh();return;}
  while(queue.current&&!queue.paused){
   if(requests>=Number($('budget').value)){queue.current.status='Waiting — request limit';queue.paused=true;message('Research allowance reached. Increase the limit, then retry.');refresh();break;}
@@ -92,13 +95,21 @@ async function drainResearch(){
   finally{clearTimeout(deadline);busy=false;requestController=null;refresh();}
  }
 }
+function flushTranscript(force=false){
+ const text=pendingText.trim();if(!text)return;
+ const boundary=[...text.matchAll(/[.!?](?:\s+|$)/g)].at(-1);
+ const end=force||!recording||Date.now()-pendingSince>=8000?text.length:boundary?boundary.index+boundary[0].length:0;
+ if(end){queue.enqueue(text.slice(0,end),$('speaker').value);pendingText=text.slice(end).trim();pendingSince=pendingText?Date.now():0;}
+ if(pendingText)scheduleResearch();
+}
 function scheduleResearch(){if(!researchTimer)researchTimer=setTimeout(()=>{researchTimer=null;drainResearch();},1200);}
 $('check').onclick=()=>{const text=$('text').value.trim();if(!text){message('Enter a factual statement first.');return;}queue.enqueue(text,$('speaker').value);drainResearch();};
 $('retry').onclick=()=>{queue.paused=false;drainResearch();};
 $('cancel').onclick=()=>{queue.paused=true;requestController?.abort();};
-$('reset').onclick=()=>{if(busy||recording||stopping)return;pendingCards=[];history=[];speakerStats={};recordedMs=0;requests=0;gaps=[];reconnects=0;clearTimeout(reconnectTimer);clearTimeout(researchTimer);researchTimer=null;queue.reset();seenClaims.clear();for(const key in counts)counts[key]=0;pendingText='';committedText='';showTranscript();$('feed').replaceChildren();$('activity').replaceChildren();$('phase').textContent='Ready';refresh();message('Session cleared.');};
+$('reset').onclick=()=>{if(busy||recording||stopping)return;pendingCards=[];history=[];speakerStats={};recordedMs=0;requests=0;gaps=[];reconnects=0;clearTimeout(reconnectTimer);clearTimeout(researchTimer);researchTimer=null;queue.reset();seenClaims.clear();for(const key in counts)counts[key]=0;pendingText='';pendingSince=0;partialSpeech='';committedText='';showTranscript();$('feed').replaceChildren();$('activity').replaceChildren();$('phase').textContent='Ready';refresh();message('Session cleared.');};
 $('display').onclick=()=>{const enabled=document.body.classList.toggle('display-mode');$('display').textContent=enabled?'Exit display mode':'Display mode';$('display').setAttribute('aria-pressed',String(enabled));};
 refresh();
+function shouldCommitSpeech(){return !!partialSpeech.trim()&&Date.now()-lastCommitAt>=20000;}
 function showTranscript(partial=''){$('transcript-preview').textContent=[committedText,partial].filter(Boolean).join(' ').slice(-350);$('transcript').textContent=[committedText,partial].filter(Boolean).join(' ');$('transcript').scrollTop=$('transcript').scrollHeight;}
 async function startupStep(promise,milliseconds,error){let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(error)),milliseconds);})]);}finally{clearTimeout(timer);}}
 function cleanupAudio(){stream?.getTracks().forEach(t=>t.stop());stream=null;sourceNode?.disconnect();pcmNode?.disconnect();muteNode?.disconnect();if(audioContext&&audioContext.state!=='closed')audioContext.close().catch(()=>{});audioContext=null;}
@@ -110,7 +121,7 @@ function stop(){
  }else old?.close();
  $('mic').disabled=true;$('mic').textContent='● Start listening';$('live').textContent='PAUSED';refresh();
  $('reset').disabled=true;
- setTimeout(()=>{stopping=false;if(!recording){$('mic').disabled=false;refresh();}},1600);
+ setTimeout(()=>{flushTranscript(true);drainResearch();stopping=false;if(!recording){$('mic').disabled=false;refresh();}},1600);
 }
 async function startLive(){
  clearTimeout(reconnectTimer);
@@ -133,10 +144,10 @@ async function startLive(){
   const {token}=await post('/api/scribe-token',{});if(!recording||id!==sessionId)return;
   await startupStep(audioContext.audioWorklet.addModule('/pcm-worklet.js'),10000,'Audio processing could not load. Reload the page and try again.');if(!recording||id!==sessionId)return;
   const rate=audioContext.sampleRate;audioRate=rate;const url=new URL('wss://api.elevenlabs.io/v1/speech-to-text/realtime');url.search=new URLSearchParams({model_id:'scribe_v2_realtime',token,audio_format:`pcm_${rate}`,commit_strategy:'vad',vad_silence_threshold_secs:'0.7'});
-  const ws=new WebSocket(url);socket=ws;showTranscript();
+  const ws=new WebSocket(url);socket=ws;lastCommitAt=Date.now();partialSpeech='';showTranscript();
   const connectionTimer=setTimeout(()=>{if(ws.readyState===WebSocket.CONNECTING){message('Live connection timed out. Please retry.');stop();}},15000);
-  ws.onopen=()=>{clearTimeout(connectionTimer);if(!recording||id!==sessionId){ws.close();return;}sourceNode=audioContext.createMediaStreamSource(stream);pcmNode=new AudioWorkletNode(audioContext,'pcm-stream');muteNode=audioContext.createGain();muteNode.gain.value=0;sourceNode.connect(pcmNode);pcmNode.connect(muteNode);muteNode.connect(audioContext.destination);pcmNode.port.onmessage=event=>{if(ws.readyState!==WebSocket.OPEN||!recording)return;if(ws.bufferedAmount>256000){message('Audio connection is too slow. Please retry.');stop();return;}const bytes=new Uint8Array(event.data);let binary='';for(const byte of bytes)binary+=String.fromCharCode(byte);ws.send(JSON.stringify({message_type:'input_audio_chunk',audio_base_64:btoa(binary),sample_rate:rate}));};recordingStarted=Date.now();$('live').textContent='LIVE';message('Live transcript is running. Pause briefly after a statement to start its fact-check.');stopTimer=setTimeout(stop,Math.max(1,Number($('duration').value)*60000-recordedMs));};
-  ws.onmessage=event=>{if(id!==sessionId)return;let data;try{data=JSON.parse(event.data);}catch{return;}if(data.message_type==='partial_transcript'){showTranscript(data.text||'');}else if(data.message_type==='committed_transcript'){const text=(data.text||'').trim();if(text){committedText=[committedText,text].filter(Boolean).join(' ');pendingText=[pendingText,text].filter(Boolean).join(' ');persist();showTranscript();scheduleResearch();}}else if(/error|exceeded|rate_limited|throttled|unaccepted|overflow|exhausted/.test(data.message_type||'')){message(`ElevenLabs: ${data.error||data.message_type}. Check Speech to Text access and credits.`);stop();}};
+  ws.onopen=()=>{clearTimeout(connectionTimer);if(!recording||id!==sessionId){ws.close();return;}sourceNode=audioContext.createMediaStreamSource(stream);pcmNode=new AudioWorkletNode(audioContext,'pcm-stream');muteNode=audioContext.createGain();muteNode.gain.value=0;sourceNode.connect(pcmNode);pcmNode.connect(muteNode);muteNode.connect(audioContext.destination);pcmNode.port.onmessage=event=>{if(ws.readyState!==WebSocket.OPEN||!recording)return;if(ws.bufferedAmount>256000){message('Audio connection is too slow. Please retry.');stop();return;}const bytes=new Uint8Array(event.data);let binary='';for(const byte of bytes)binary+=String.fromCharCode(byte);const commit=shouldCommitSpeech();if(commit)lastCommitAt=Date.now();ws.send(JSON.stringify({message_type:'input_audio_chunk',audio_base_64:btoa(binary),sample_rate:rate,...(commit?{commit:true}:{})}));};recordingStarted=Date.now();$('live').textContent='LIVE';message('Listening continuously. Statements are queued for checking while you speak.');stopTimer=setTimeout(stop,Math.max(1,Number($('duration').value)*60000-recordedMs));};
+  ws.onmessage=event=>{if(id!==sessionId)return;let data;try{data=JSON.parse(event.data);}catch{return;}if(data.message_type==='partial_transcript'){partialSpeech=data.text||'';showTranscript(partialSpeech);}else if(data.message_type==='committed_transcript'){lastCommitAt=Date.now();partialSpeech='';const text=(data.text||'').trim();if(text){if(!pendingText.trim())pendingSince=Date.now();committedText=[committedText,text].filter(Boolean).join(' ');pendingText=[pendingText,text].filter(Boolean).join(' ');persist();showTranscript();scheduleResearch();}}else if(/error|exceeded|rate_limited|throttled|unaccepted|overflow|exhausted/.test(data.message_type||'')){message(`ElevenLabs: ${data.error||data.message_type}. Check Speech to Text access and credits.`);stop();}};
   ws.onerror=()=>{if(id===sessionId){message('ElevenLabs live connection failed. Check Speech to Text permissions and credits.');stop();}};
   ws.onclose=()=>{clearTimeout(connectionTimer);if(id===sessionId&&recording){gaps.push(new Date().toISOString());message('Connection lost. A gap was recorded. Press Start listening to resume.');stop();reconnect();}};
  }catch(error){if(id===sessionId){const errors={NotAllowedError:'Microphone access was blocked. Allow the microphone in your browser site settings, then try again.',NotFoundError:'No microphone was found. Connect or enable a microphone and try again.',NotReadableError:'The microphone is unavailable or being used by another app. Close the other recording app and retry.'};message(errors[error.name]||error.message||'Could not start microphone.');stop();}}

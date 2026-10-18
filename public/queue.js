@@ -7,14 +7,14 @@ export class ResearchQueue {
     const pieces=[];
     let rest=text.trim();
     while(rest.length){
-      let end=Math.min(rest.length,1200);
+      let end=Math.min(rest.length,700);
       if(end<rest.length){const sentence=[...rest.slice(0,end).matchAll(/[.!?][\s]+/g)].at(-1);const boundary=sentence?sentence.index+sentence[0].length:rest.lastIndexOf(' ',end);if(boundary>0)end=boundary;}
       pieces.push(rest.slice(0,end));rest=rest.slice(end).trimStart();
     }
     for(const part of pieces){
       const key=JSON.stringify([speaker,part.replace(/\s+/g,' ').trim()]);
       const original=this.sections.find(x=>x.key===key&&!x.duplicate);
-      const context=this.sections.filter(s=>!s.duplicate&&!s.parent).at(-1)?.text.slice(-600)||'';
+      const context=this.sections.filter(s=>!s.duplicate&&!s.parent&&s.speaker===speaker).slice(-3).map(s=>s.text).join(' ').slice(-1200);
       const section={id:this.sections.length+1,text:part,speaker,key,context,status:'Waiting',createdAt:new Date().toISOString()};
       if(original){section.duplicate=original.id;section.status='Repeated section';this.sections.push(section);}
       else{this.sections.push(section);this.items.push(section);}

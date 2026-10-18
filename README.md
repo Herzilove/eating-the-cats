@@ -71,3 +71,7 @@ The transcript shows a short tail preview with an expandable full transcript. Re
 ## Focused interface
 
 The English Live view shows one published assessment, current detection, a three-line transcript preview and section progress. Detailed research is collapsed. The Results view shows the complete published feed with verdict filters; Speaker view keeps comparisons separate. Incoming cards are buffered behind a new-results button so reading is not interrupted. They are still included immediately in session history, counts, saving and export. Reset is in session settings. Provider-originated diagnostic messages may retain their original language.
+
+### Continuous single-speaker listening
+
+The default live view prioritizes detection, transcript, and evidence. Optional speaker controls are collapsed inside session settings. Finalized speech is queued at sentence boundaries, with an eight-second maximum wait for an unfinished tail; stopping flushes the tail. Research sections are capped at 700 characters and receive up to 1,200 characters of recent same-speaker context. The extraction prompt can recover assertions completed across section boundaries. During continuous partial speech, an audio chunk requests a commit after 20 seconds without a final transcript. Natural VAD commits reset this deadline. This bounds the request cadence, not provider response latency. Recognition and claim recall are not guaranteed; failed research and request limits remain visible and retryable. Smaller sections can consume the existing research allowance faster.
