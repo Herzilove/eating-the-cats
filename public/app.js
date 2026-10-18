@@ -4,7 +4,7 @@ let busy=false,recording=false,stopping=false,stream,stopTimer,socket,audioConte
 let committedText='',pendingText='',researchTimer,sessionId=0,audioRate=16000,requestController;
 const queue=new ResearchQueue(),seenClaims=new Set();
 let pendingCards=[];
-const uiLabels={'Supported':'Belegt','Contradicted':'Widersprochen','Needs Context':'Kontext nötig','Unverified':'Ungeklärt','Ready':'Bereit','Detecting':'Erkennung','Searching':'Recherche','Assessing':'Bewertung','Complete':'Abgeschlossen','Paused':'Pausiert','Retry needed':'Erneut prüfen','Waiting':'Wartet','Researching':'In Recherche','Partial results':'Teilresultate','Claims queued':'Claims eingereiht','Assessed':'Geprüft','Assessed in groups':'In Gruppen geprüft','No checkable claim detected':'Keine prüfbare Aussage erkannt','Repeated section':'Wiederholung','Failed — retry needed':'Fehlgeschlagen – erneut prüfen','Cancelled — retry needed':'Abgebrochen – erneut prüfen','Waiting — request limit':'Wartet – Limit erreicht','Waiting — restored':'Wartet – wiederhergestellt','Unknown':'Unbekannt'};
+const uiLabels={};
 const label=value=>uiLabels[value]||value;
 function applyFilter(){const selected=$('verdict-filter').value||'all';for(const card of $('feed').children)card.hidden=selected!=='all'&&card.dataset.verdict!==selected;}
 function flushCards(){for(const card of pendingCards){$('feed').prepend(card);}if(pendingCards.length)pendingCards.at(-1).open=true;pendingCards=[];$('new-results').hidden=true;applyFilter();}
@@ -17,12 +17,12 @@ function updateSession(){
  for(const parent of queue.sections.filter(s=>s.status==='Claims queued')){const children=queue.sections.filter(s=>s.parent===parent.id);if(children.length&&children.every(s=>s.status==='Assessed'||s.status==='No checkable claim detected'))parent.status='Assessed in groups';}
  $('coverage').replaceChildren();
  const totals={};for(const section of queue.sections){totals[section.status]=(totals[section.status]||0)+1;const row=document.createElement('details');const summary=document.createElement('summary');summary.textContent='#'+section.id+' · '+label(section.status)+(section.duplicate?' (see #'+section.duplicate+')':'')+' · '+(section.speaker||'Unknown')+' · '+new Date(section.createdAt).toLocaleTimeString();const p=document.createElement('p');p.textContent=section.selectedClaims?section.selectedClaims.join(' • '):section.text;row.append(summary,p);$('coverage').append(row);}
- $('coverage-count').textContent=Object.entries(totals).map(([status,n])=>n+' '+label(status)).join(' · ')||'Noch keine Abschnitte';
+ $('coverage-count').textContent=Object.entries(totals).map(([status,n])=>n+' '+label(status)).join(' · ')||'No sections yet';
  $('duration').disabled=recording||stopping;
  $('speaker').disabled=recording||stopping;
  document.querySelectorAll('[data-speaker]').forEach(b=>b.disabled=recording||stopping);
  $('restore').disabled=busy||recording||stopping;
- $('budget-status').textContent=requests+' / '+$('budget').value+' Rechercheanfragen · '+gaps.length+' Verbindungslücken';
+ $('budget-status').textContent=requests+' / '+$('budget').value+' research requests · '+gaps.length+' connection gaps';
  $('speaker-stats').replaceChildren();
  for(const [name,stats] of Object.entries(speakerStats)){const row=document.createElement('article');row.className='speaker-stat';const title=document.createElement('h3');title.textContent=name;row.append(title);for(const verdict of ['Supported','Contradicted','Needs Context','Unverified']){const p=document.createElement('p');p.textContent=verdict+': '+(stats[verdict]||0);row.append(p);}$('speaker-stats').append(row);}
  persist();
@@ -30,35 +30,17 @@ function updateSession(){
 function showPending(text,phase){const card=document.createElement('article');card.className='claim pending-claim';const label=document.createElement('span');label.id='pending-phase';label.className='badge';label.textContent=uiLabels[phase]||phase;const p=document.createElement('p');p.textContent=text;card.append(label,p);$('inflight').replaceChildren(card);}
 
 const counts={'Supported':0,'Contradicted':0,'Needs Context':0,'Unverified':0};
-const notices={
-'Researching the next transcript batch…':'Der nächste Abschnitt wird geprüft…',
-'Assessment complete.':'Bewertung abgeschlossen.',
-'Enter a factual statement first.':'Gib zuerst eine prüfbare Aussage ein.',
-'Session cleared.':'Sitzung zurückgesetzt.',
-'Research allowance reached. Increase the limit, then retry.':'Recherchelimit erreicht. Erhöhe es in den Sitzungseinstellungen und starte erneut.',
-'Retry or clear the pending research before recording again.':'Bitte offene Prüfungen wiederholen oder die Sitzung zurücksetzen.',
-'Recording allowance reached. Increase it or reset the session.':'Aufnahmedauer erreicht. Erhöhe sie in den Einstellungen oder starte eine neue Sitzung.',
-'Connecting to ElevenLabs live transcription…':'Verbindung zur Live-Transkription wird aufgebaut…',
-'Allow microphone access in your browser. Waiting for permission…':'Bitte erlaube den Mikrofonzugriff im Browser…',
-'Starting microphone audio…':'Mikrofon wird gestartet…',
-'Requesting a secure transcription connection…':'Sichere Transkriptionsverbindung wird angefordert…',
-'Live transcript is running. Pause briefly after a statement to start its fact-check.':'Transkription läuft. Kurze Sprechpausen helfen, vollständige Aussagen zu prüfen.',
-'Session restored. Recording and research stay paused until you resume.':'Sitzung wiederhergestellt. Aufnahme und Recherche bleiben bis zum Fortsetzen pausiert.',
-'Saved session deleted from this device.':'Gespeicherte Sitzung von diesem Gerät gelöscht.',
-'No readable saved session is available on this device.':'Auf diesem Gerät ist keine lesbare Sitzung gespeichert.',
-'Research cancelled or timed out. Pending text is kept.':'Recherche abgebrochen oder Zeitlimit erreicht. Offener Text bleibt erhalten.'
-};
-const message=s=>$('message').textContent=notices[s]||s;
+const message=s=>$('message').textContent=s;
 const headers=()=>({'Content-Type':'application/json'});
 async function post(path,body){const r=await fetch(path,{method:'POST',headers:headers(),body:JSON.stringify(body),signal:AbortSignal.timeout(20000)});const data=await r.json();if(!r.ok)throw Error(data.error||'Request failed');return data;}
 function refresh(){
  updateSession();
- $('count').textContent=`${seenClaims.size} AUSSAGEN`;
- $('progress-line').textContent=`${seenClaims.size} bewertet · ${busy?1:0} Abschnitt in Arbeit · ${Math.max(0,queue.items.length-(busy?1:0))} warten`;
+ $('count').textContent=`${seenClaims.size} CLAIMS`;
+ $('progress-line').textContent=`${seenClaims.size} assessed · ${busy?1:0} section in progress · ${Math.max(0,queue.items.length-(busy?1:0))} waiting`;
  $('new-results').hidden=!pendingCards.length;
- $('new-results').textContent=`${pendingCards.length} neue Ergebnisse anzeigen`;
+ $('new-results').textContent=`${pendingCards.length} new results — show`;
  for(const [name,count] of Object.entries(counts))$(name.replaceAll(' ','-')).textContent=count;
- $('pending').textContent=`${queue.items.length} Prüfgruppen warten`;
+ $('pending').textContent=`${queue.items.length} research groups pending`;
  $('retry').hidden=!queue.paused;
  $('cancel').disabled=!busy;
  $('reset').disabled=busy||recording||stopping;
@@ -83,9 +65,9 @@ function render(data,speaker,remember=true){
    const s=data.sources[id-1];if(!s)continue;
    let url;try{url=new URL(s.url);if(!['https:','http:'].includes(url.protocol))continue;}catch{continue;}
    const a=document.createElement('a');a.href=url.href;a.target='_blank';a.rel='noopener noreferrer';a.textContent=`[${id}] ${s.title}`;card.append(a);
-   if(s.excerpt){const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='Quellenauszug ansehen';const excerpt=document.createElement('p');excerpt.textContent=s.excerpt;details.append(summary,excerpt);card.append(details);}
+   if(s.excerpt){const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='View source excerpt';const excerpt=document.createElement('p');excerpt.textContent=s.excerpt;details.append(summary,excerpt);card.append(details);}
   }
-  const meta=document.createElement('div');meta.className='meta';meta.textContent=`${speaker||'Unbekannter Sprecher'} · ${new Date(data.checkedAt).toLocaleTimeString()} · ${data.searches.length} Suchen${data.cached?' · gespeichertes Ergebnis':''}`;card.append(meta);if(seenClaims.size===1){$('feed').prepend(card);}else{pendingCards.push(card);}applyFilter();
+  const meta=document.createElement('div');meta.className='meta';meta.textContent=`${speaker||'Unlabelled speaker'} · ${new Date(data.checkedAt).toLocaleTimeString()} · ${data.searches.length} searches${data.cached?' · cached result':''}`;card.append(meta);if(seenClaims.size===1){$('feed').prepend(card);}else{pendingCards.push(card);}applyFilter();
  const owner=speaker||'Unknown';speakerStats[owner]??={};speakerStats[owner][c.verdict]=(speakerStats[owner][c.verdict]||0)+1;
  }
  refresh();
@@ -114,8 +96,8 @@ function scheduleResearch(){if(!researchTimer)researchTimer=setTimeout(()=>{rese
 $('check').onclick=()=>{const text=$('text').value.trim();if(!text){message('Enter a factual statement first.');return;}queue.enqueue(text,$('speaker').value);drainResearch();};
 $('retry').onclick=()=>{queue.paused=false;drainResearch();};
 $('cancel').onclick=()=>{queue.paused=true;requestController?.abort();};
-$('reset').onclick=()=>{if(busy||recording||stopping)return;pendingCards=[];history=[];speakerStats={};recordedMs=0;requests=0;gaps=[];reconnects=0;clearTimeout(reconnectTimer);clearTimeout(researchTimer);researchTimer=null;queue.reset();seenClaims.clear();for(const key in counts)counts[key]=0;pendingText='';committedText='';showTranscript();$('feed').replaceChildren();$('activity').replaceChildren();$('phase').textContent='Bereit';refresh();message('Session cleared.');};
-$('display').onclick=()=>{const enabled=document.body.classList.toggle('display-mode');$('display').textContent=enabled?'Bühnenansicht beenden':'Bühnenansicht';$('display').setAttribute('aria-pressed',String(enabled));};
+$('reset').onclick=()=>{if(busy||recording||stopping)return;pendingCards=[];history=[];speakerStats={};recordedMs=0;requests=0;gaps=[];reconnects=0;clearTimeout(reconnectTimer);clearTimeout(researchTimer);researchTimer=null;queue.reset();seenClaims.clear();for(const key in counts)counts[key]=0;pendingText='';committedText='';showTranscript();$('feed').replaceChildren();$('activity').replaceChildren();$('phase').textContent='Ready';refresh();message('Session cleared.');};
+$('display').onclick=()=>{const enabled=document.body.classList.toggle('display-mode');$('display').textContent=enabled?'Exit display mode':'Display mode';$('display').setAttribute('aria-pressed',String(enabled));};
 refresh();
 function showTranscript(partial=''){$('transcript-preview').textContent=[committedText,partial].filter(Boolean).join(' ').slice(-350);$('transcript').textContent=[committedText,partial].filter(Boolean).join(' ');$('transcript').scrollTop=$('transcript').scrollHeight;}
 async function startupStep(promise,milliseconds,error){let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(error)),milliseconds);})]);}finally{clearTimeout(timer);}}
@@ -126,7 +108,7 @@ function stop(){
   old.send(JSON.stringify({message_type:'input_audio_chunk',audio_base_64:btoa(String.fromCharCode(...new Uint8Array(3200))),commit:true,sample_rate:audioRate}));
   setTimeout(()=>old.close(),1500);
  }else old?.close();
- $('mic').disabled=true;$('mic').textContent='● Zuhören starten';$('live').textContent='PAUSIERT';refresh();
+ $('mic').disabled=true;$('mic').textContent='● Start listening';$('live').textContent='PAUSED';refresh();
  $('reset').disabled=true;
  setTimeout(()=>{stopping=false;if(!recording){$('mic').disabled=false;refresh();}},1600);
 }
@@ -135,7 +117,7 @@ async function startLive(){
  if(recording||stopping)return;
  if(queue.paused){message('Retry or clear the pending research before recording again.');return;}
  if(recordedMs>=Number($('duration').value)*60000){message('Recording allowance reached. Increase it or reset the session.');return;}
- const id=++sessionId;recording=true;refresh();$('mic').textContent='■ Aufnahme pausieren';$('live').textContent='VERBINDET';message('Connecting to ElevenLabs live transcription…');
+ const id=++sessionId;recording=true;refresh();$('mic').textContent='■ Pause listening';$('live').textContent='CONNECTING';message('Connecting to ElevenLabs live transcription…');
  try{
   const Context=window.AudioContext||window.webkitAudioContext;if(!Context||!navigator.mediaDevices?.getUserMedia)throw Error('Live recording requires HTTPS and a supported browser.');
   message('Allow microphone access in your browser. Waiting for permission…');
@@ -160,7 +142,7 @@ async function startLive(){
  }catch(error){if(id===sessionId){const errors={NotAllowedError:'Microphone access was blocked. Allow the microphone in your browser site settings, then try again.',NotFoundError:'No microphone was found. Connect or enable a microphone and try again.',NotReadableError:'The microphone is unavailable or being used by another app. Close the other recording app and retry.'};message(errors[error.name]||error.message||'Could not start microphone.');stop();}}
 }
 $('mic').onclick=()=>{if(recording)stop();else startLive();};
-fetch('/api/status').then(r=>r.json()).then(s=>{for(const [key,label] of [['nebius','Token Factory'],['tavily','Tavily'],['elevenlabs','ElevenLabs']]){const span=document.createElement('span');span.textContent=`${s[key]?'●':'○'} ${label}: ${s[key]?'configured':'missing'}`;$('services').append(span);}if($('message').textContent==='Verbindungen werden geprüft…')message('');}).catch(()=>message('Could not read service configuration.'));
+fetch('/api/status').then(r=>r.json()).then(s=>{for(const [key,label] of [['nebius','Token Factory'],['tavily','Tavily'],['elevenlabs','ElevenLabs']]){const span=document.createElement('span');span.textContent=`${s[key]?'●':'○'} ${label}: ${s[key]?'configured':'missing'}`;$('services').append(span);}if($('message').textContent==='Checking service configuration…')message('');}).catch(()=>message('Could not read service configuration.'));
 window.addEventListener('pagehide',()=>{stop();requestController?.abort();});
 document.querySelectorAll('button[data-view]').forEach(button=>{
  button.onclick=()=>{document.body.dataset.view=button.dataset.view;if(button.dataset.view==='live'){$('verdict-filter').value='all';applyFilter();}document.querySelectorAll('button[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));};
