@@ -90,3 +90,14 @@ test('Parallel workers cannot exceed the shared three-search allocation',async()
  const tool=body.messages.some(m=>m.role==='tool');return {ok:true,json:async()=>({choices:[{message:tool?{role:'assistant',content:'{"claims":[{"claim":"Claim","verdict":"Supported","explanation":"Evidence","source_ids":[1]}]}'}:{role:'assistant',tool_calls:[1,2,3].map(id=>({id:String(id),type:'function',function:{name:'search_web',arguments:'{"query":"Evidence search"}'}}))}}]})};};
  try{const res=response();await check({method:'POST',headers:{accept:'application/x-ndjson'},body:{text:'Budget allocation test'}},res);assert.equal(calls,3);assert.ok(res.lines.includes('"type":"result"'));}finally{globalThis.fetch=oldFetch;for(const key of ['NEBIUS_API_KEY','NEBIUS_MODEL','TAVILY_API_KEY']){if(saved[key]===undefined)delete process.env[key];else process.env[key]=saved[key];}}
 });
+test('Section ledger retains repeated input and every deferred claim',()=>{
+ const q=new ResearchQueue();q.enqueue('A statement','A');q.enqueue('A statement','A');assert.equal(q.sections.length,2);assert.equal(q.items.length,1);assert.equal(q.sections[1].duplicate,1);
+ const claims=Array.from({length:8},(_,i)=>'Claim '+i);q.enqueueClaims('Original text','A',claims,1);assert.deepEqual(q.items.slice(1).flatMap(x=>x.selectedClaims),claims);assert.ok(q.items.slice(1).every(x=>x.selectedClaims.length<=3));
+});
+test('More than three extracted claims are returned for queued processing, never sliced away',async()=>{
+ const old=globalThis.fetch,saved={...process.env};Object.assign(process.env,{NEBIUS_API_KEY:'test',NEBIUS_MODEL:'coverage',TAVILY_API_KEY:'test'});
+ const claims=['One','Two','Three','Four','Five'];let calls=0;
+ globalThis.fetch=async()=>{calls++;return {ok:true,json:async()=>({choices:[{message:{content:JSON.stringify({claims})},finish_reason:'stop'}]})};};
+ try{const res=response();await check({method:'POST',headers:{accept:'application/x-ndjson'},body:{text:'Five distinct claims'}},res);const result=res.lines.trim().split('\n').map(JSON.parse).find(e=>e.type==='result');assert.deepEqual(result.data.deferred,claims);assert.equal(calls,1);}
+ finally{globalThis.fetch=old;for(const key of ['NEBIUS_API_KEY','NEBIUS_MODEL','TAVILY_API_KEY']){if(saved[key]===undefined)delete process.env[key];else process.env[key]=saved[key];}}
+});

@@ -33,3 +33,10 @@ test('Late microphone permission after cancellation immediately closes the track
  const start=vm.runInContext('startLive()',b.context);vm.runInContext('stop()',b.context);grant({getTracks:()=>[{stop(){stopped++;}}]});await start;
  assert.ok(stopped>=1);assert.equal(vm.runInContext('recording',b.context),false);
 });
+test('Deferred claims stay queued when the request allowance is exhausted',async()=>{
+ const b=await browser();b.get('budget').value='1';let delivered=false;
+ const payload=new TextEncoder().encode(JSON.stringify({type:'result',data:{claims:[],sources:[],searches:[],deferred:['One','Two','Three','Four'],checkedAt:new Date().toISOString()}})+'\n');
+ b.context.fetch=async()=>({ok:true,body:{getReader:()=>({read:async()=>{if(delivered)return {done:true};delivered=true;return {done:false,value:payload};},releaseLock(){}})}});
+ vm.runInContext("queue.enqueue('Original section','A')",b.context);await vm.runInContext('drainResearch()',b.context);
+ assert.equal(vm.runInContext('queue.items.length',b.context),2);assert.equal(vm.runInContext('queue.sections[0].status',b.context),'Claims queued');assert.equal(vm.runInContext('queue.items.flatMap(x=>x.selectedClaims).length',b.context),4);assert.equal(vm.runInContext('queue.paused',b.context),true);
+});

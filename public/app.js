@@ -6,8 +6,12 @@ const queue=new ResearchQueue(),seenClaims=new Set();
 let history=[],speakerStats={},recordedMs=0,recordingStarted=0,requests=0,gaps=[],reconnects=0,reconnectTimer;
 function reconnect(){if(!$('reconnect').checked||reconnects>=3)return;reconnects++;message('Connection interrupted. Reconnecting; some speech may be missing.');reconnectTimer=setTimeout(()=>{if($('reconnect').checked&&!recording)startLive();},2000);}
 const storageKey='eating-the-cats-session-v1';
-function persist(){if(!$('save-local').checked)return;try{localStorage.setItem(storageKey,JSON.stringify({version:1,history,committedText,pendingText,items:queue.items,completed:[...queue.completed],recordedMs:recordedMs+(recordingStarted?Date.now()-recordingStarted:0),requests,gaps,speaker:$('speaker').value,duration:$('duration').value,budget:$('budget').value}));}catch{message('Device storage is full or unavailable. Export your session before closing.');}}
+function persist(){if(!$('save-local').checked)return;try{localStorage.setItem(storageKey,JSON.stringify({version:1,history,committedText,pendingText,items:queue.items,sections:queue.sections,completed:[...queue.completed],recordedMs:recordedMs+(recordingStarted?Date.now()-recordingStarted:0),requests,gaps,speaker:$('speaker').value,duration:$('duration').value,budget:$('budget').value}));}catch{message('Device storage is full or unavailable. Export your session before closing.');}}
 function updateSession(){
+ for(const parent of queue.sections.filter(s=>s.status==='Claims queued')){const children=queue.sections.filter(s=>s.parent===parent.id);if(children.length&&children.every(s=>s.status==='Assessed'||s.status==='No checkable claim detected'))parent.status='Assessed in groups';}
+ $('coverage').replaceChildren();
+ const totals={};for(const section of queue.sections){totals[section.status]=(totals[section.status]||0)+1;const row=document.createElement('details');const summary=document.createElement('summary');summary.textContent='#'+section.id+' · '+section.status+(section.duplicate?' (see #'+section.duplicate+')':'')+' · '+(section.speaker||'Unknown')+' · '+new Date(section.createdAt).toLocaleTimeString();const p=document.createElement('p');p.textContent=section.selectedClaims?section.selectedClaims.join(' • '):section.text;row.append(summary,p);$('coverage').append(row);}
+ $('coverage-count').textContent=Object.entries(totals).map(([status,n])=>n+' '+status).join(' · ')||'No sections yet';
  $('duration').disabled=recording||stopping;
  $('speaker').disabled=recording||stopping;
  document.querySelectorAll('[data-speaker]').forEach(b=>b.disabled=recording||stopping);
@@ -44,10 +48,10 @@ function render(data,speaker,remember=true){
  for(const c of data.claims){
   const key=JSON.stringify([speaker,c.claim.toLowerCase().replace(/\s+/g,' ').trim()]);if(seenClaims.has(key))continue;
   if(!seenClaims.size)$('feed').replaceChildren();seenClaims.add(key);counts[c.verdict]++;
-  const card=document.createElement('article');card.className='claim';
+  const card=document.createElement('details');card.className='claim';card.open=!seenClaims.size||seenClaims.size===1;
   const badge=document.createElement('span');badge.className='badge';badge.dataset.verdict=c.verdict;badge.textContent=c.verdict;
-  const title=document.createElement('h3');title.textContent=c.claim;
-  const p=document.createElement('p');p.textContent=c.explanation;card.append(badge,title,p);
+  const title=document.createElement('summary');title.textContent=c.claim;
+  const p=document.createElement('p');p.textContent=c.explanation;title.prepend(badge);card.append(title,p);
   for(const id of c.source_ids){
    const s=data.sources[id-1];if(!s)continue;
    let url;try{url=new URL(s.url);if(!['https:','http:'].includes(url.protocol))continue;}catch{continue;}
@@ -59,8 +63,8 @@ function render(data,speaker,remember=true){
  }
  refresh();
 }
-async function research(text,signal,onClaim=()=>{}){
- const response=await fetch('/api/check',{method:'POST',headers:{...headers(),Accept:'application/x-ndjson'},body:JSON.stringify({text}),signal});
+async function research(text,signal,onClaim=()=>{},selectedClaims,context){
+ const response=await fetch('/api/check',{method:'POST',headers:{...headers(),Accept:'application/x-ndjson'},body:JSON.stringify({text,selectedClaims,context}),signal});
  if(!response.ok){const data=await response.json();throw Error(data.error||'Request failed');}
  const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',result;
  const consume=line=>{if(!line.trim())return;const event=JSON.parse(line);if(event.type==='error')throw Error(event.error);if(event.type==='activity'){activity(event.phase,event.message);$('pending-phase')?.replaceChildren(document.createTextNode(event.phase));}if(event.type==='claims')showPending(event.claims.join(' • '),'Searching');if(event.type==='sources'){for(const source of event.sources){const u=new URL(source.url);if(!['http:','https:'].includes(u.protocol))continue;const a=document.createElement('a');a.href=u.href;a.rel='noopener noreferrer';a.target='_blank';a.textContent=source.title;$('inflight').firstChild?.append(a);}}if(event.type==='claim_result'){onClaim(event.data);activity('Assessing','A claim is ready; remaining research continues.');}if(event.type==='claim_error')activity('Retry needed',event.error);if(event.type==='result')result=event.data;};
@@ -72,10 +76,10 @@ async function drainResearch(){
  if(pendingText.trim()){queue.enqueue(pendingText,$('speaker').value);pendingText='';}
  if(busy||queue.paused){refresh();return;}
  while(queue.current&&!queue.paused){
-  if(requests>=Number($('budget').value)){queue.paused=true;message('Research allowance reached. Increase the limit, then retry.');refresh();break;}
-  requests++;busy=true;requestController=new AbortController();const deadline=setTimeout(()=>requestController.abort(),57000);const item=queue.current;refresh();showPending(item.text,'Detecting');message('Researching the next transcript batch…');
-  try{const data=await research(item.text,requestController.signal,partial=>render(partial,item.speaker));render(data,item.speaker);queue.acknowledge();$('inflight').replaceChildren();activity('Complete',data.claims.length?'Assessment complete. Review the linked evidence.':'No checkable claims found.');message('Assessment complete.');}
-  catch(e){showPending(queue.current?.text||'','Paused — text retained');queue.paused=true;activity('Paused','Your transcript is retained for retry.');message(e.name==='AbortError'?'Research cancelled or timed out. Pending text is kept.':e.message);}
+  if(requests>=Number($('budget').value)){queue.current.status='Waiting — request limit';queue.paused=true;message('Research allowance reached. Increase the limit, then retry.');refresh();break;}
+  requests++;busy=true;requestController=new AbortController();const deadline=setTimeout(()=>requestController.abort(),57000);const item=queue.current;item.status='Researching';refresh();showPending(item.text,'Detecting');message('Researching the next transcript batch…');
+  try{const data=await research(item.text,requestController.signal,partial=>{item.status='Partial results';render(partial,item.speaker);},item.selectedClaims,item.context);render(data,item.speaker);item.status=data.deferred?.length?'Claims queued':data.claims.length?'Assessed':'No checkable claim detected';queue.acknowledge();if(data.deferred?.length)queue.enqueueClaims(item.text,item.speaker,data.deferred,item.id);$('inflight').replaceChildren();activity('Complete',data.claims.length?'Assessment complete. Review the linked evidence.':'No checkable claims found.');message('Assessment complete.');}
+  catch(e){item.status=e.name==='AbortError'?'Cancelled — retry needed':'Failed — retry needed';showPending(queue.current?.text||'','Paused — text retained');queue.paused=true;activity('Paused','Your transcript is retained for retry.');message(e.name==='AbortError'?'Research cancelled or timed out. Pending text is kept.':e.message);}
   finally{clearTimeout(deadline);busy=false;requestController=null;refresh();}
  }
 }
@@ -86,7 +90,7 @@ $('cancel').onclick=()=>{queue.paused=true;requestController?.abort();};
 $('reset').onclick=()=>{if(busy||recording||stopping)return;history=[];speakerStats={};recordedMs=0;requests=0;gaps=[];reconnects=0;clearTimeout(reconnectTimer);clearTimeout(researchTimer);researchTimer=null;queue.reset();seenClaims.clear();for(const key in counts)counts[key]=0;pendingText='';committedText='';$('transcript').textContent='';$('feed').replaceChildren();$('activity').replaceChildren();$('phase').textContent='Ready';refresh();message('Session cleared.');};
 $('display').onclick=()=>{const enabled=document.body.classList.toggle('display-mode');$('display').textContent=enabled?'Exit display mode':'Display mode';$('display').setAttribute('aria-pressed',String(enabled));};
 refresh();
-function showTranscript(partial=''){$('transcript').textContent=[committedText,partial].filter(Boolean).join(' ').slice(-6000);$('transcript').scrollTop=$('transcript').scrollHeight;}
+function showTranscript(partial=''){$('transcript-preview').textContent=[committedText,partial].filter(Boolean).join(' ').slice(-350);$('transcript').textContent=[committedText,partial].filter(Boolean).join(' ');$('transcript').scrollTop=$('transcript').scrollHeight;}
 async function startupStep(promise,milliseconds,error){let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(error)),milliseconds);})]);}finally{clearTimeout(timer);}}
 function cleanupAudio(){stream?.getTracks().forEach(t=>t.stop());stream=null;sourceNode?.disconnect();pcmNode?.disconnect();muteNode?.disconnect();if(audioContext&&audioContext.state!=='closed')audioContext.close().catch(()=>{});audioContext=null;}
 function stop(){
@@ -147,7 +151,7 @@ $('speaker').onchange=()=>{document.querySelectorAll('[data-speaker]').forEach(b
 $('save-local').onchange=()=>{try{if($('save-local').checked)persist();else localStorage.removeItem(storageKey);}catch{message('Device storage is unavailable.');}};
 $('forget').onclick=()=>{try{localStorage.removeItem(storageKey);$('save-local').checked=false;message('Saved session deleted from this device.');}catch{message('Device storage is unavailable.');}};
 $('export').onclick=()=>{
- const blob=new Blob([JSON.stringify({version:1,exportedAt:new Date().toISOString(),history,transcript:committedText,pending:queue.items,pendingText,gaps},null,2)],{type:'application/json'});
+ const blob=new Blob([JSON.stringify({version:1,exportedAt:new Date().toISOString(),history,transcript:committedText,pending:queue.items,sections:queue.sections,pendingText,gaps},null,2)],{type:'application/json'});
  const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='discussion-'+new Date().toISOString().slice(0,10)+'.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 };
 $('restore').onclick=()=>{
@@ -163,7 +167,7 @@ $('restore').onclick=()=>{
   recordedMs=Number(saved.recordedMs)||0;requests=Number(saved.requests)||0;gaps=Array.isArray(saved.gaps)?saved.gaps:[];
   $('speaker').value=saved.speaker||'';$('duration').value=saved.duration||'30';$('budget').value=saved.budget||'20';
   queue.completed=new Set(Array.isArray(saved.completed)?saved.completed:[]);
-  for(const item of saved.items)queue.enqueue(item.text,item.speaker);
+  if(Array.isArray(saved.sections)){queue.sections=saved.sections;queue.items=saved.items.map(item=>{const section=queue.sections.find(s=>s.id===item.id)||item;section.status='Waiting — restored';return section;});}else{for(const item of saved.items)queue.enqueue(item.text,item.speaker);}
   for(const entry of saved.history)render(entry.data,entry.speaker);
   queue.paused=queue.items.length>0||!!pendingText;$('save-local').checked=true;
   document.querySelectorAll('[data-speaker]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.speaker===$('speaker').value)));
