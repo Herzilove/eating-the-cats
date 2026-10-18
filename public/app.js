@@ -21,7 +21,7 @@ function showPending(text,phase){const card=document.createElement('article');ca
 
 const counts={'Supported':0,'Contradicted':0,'Needs Context':0,'Unverified':0};
 const message=s=>$('message').textContent=s;
-const headers=()=>({'Content-Type':'application/json',...($('access-code').value?{Authorization:`Bearer ${$('access-code').value}`}:{})});
+const headers=()=>({'Content-Type':'application/json'});
 async function post(path,body){const r=await fetch(path,{method:'POST',headers:headers(),body:JSON.stringify(body),signal:AbortSignal.timeout(20000)});const data=await r.json();if(!r.ok)throw Error(data.error||'Request failed');return data;}
 function refresh(){
  updateSession();
@@ -129,7 +129,7 @@ async function startLive(){
  }catch(error){if(id===sessionId){const errors={NotAllowedError:'Microphone access was blocked. Allow the microphone in your browser site settings, then try again.',NotFoundError:'No microphone was found. Connect or enable a microphone and try again.',NotReadableError:'The microphone is unavailable or being used by another app. Close the other recording app and retry.'};message(errors[error.name]||error.message||'Could not start microphone.');stop();}}
 }
 $('mic').onclick=()=>{if(recording)stop();else startLive();};
-fetch('/api/status').then(r=>r.json()).then(s=>{$('access').hidden=!s.accessRequired;for(const [key,label] of [['nebius','Token Factory'],['tavily','Tavily'],['elevenlabs','ElevenLabs']]){const span=document.createElement('span');span.textContent=`${s[key]?'●':'○'} ${label}: ${s[key]?'configured':'missing'}`;$('services').append(span);}message('Configuration indicators do not verify API access. First live use will consume provider credits.');}).catch(()=>message('Could not read service configuration.'));
+fetch('/api/status').then(r=>r.json()).then(s=>{for(const [key,label] of [['nebius','Token Factory'],['tavily','Tavily'],['elevenlabs','ElevenLabs']]){const span=document.createElement('span');span.textContent=`${s[key]?'●':'○'} ${label}: ${s[key]?'configured':'missing'}`;$('services').append(span);}message('Configuration indicators do not verify API access. First live use will consume provider credits.');}).catch(()=>message('Could not read service configuration.'));
 window.addEventListener('pagehide',()=>{stop();requestController?.abort();});
 document.querySelectorAll('button[data-view]').forEach(button=>{
  button.onclick=()=>{document.body.dataset.view=button.dataset.view;document.querySelectorAll('button[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));};

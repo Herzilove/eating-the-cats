@@ -12,12 +12,11 @@ NEBIUS_BASE_URL=https://api.tokenfactory.nebius.com/v1
 NEBIUS_MODEL=your_available_tool_calling_model_id
 TAVILY_API_KEY=your_tavily_key
 ELEVENLABS_API_KEY=your_elevenlabs_key
-DEMO_ACCESS_TOKEN=your_long_random_demo_access_code
 ```
 
-Use the exact model ID available in your Token Factory account. The model must support function/tool calling. The ElevenLabs key needs Speech to Text access. Never use provider keys as the demo access code. Never put provider keys into browser JavaScript or commit `.env.local`.
+Use the exact model ID available in your Token Factory account. The model must support function/tool calling. The ElevenLabs key needs Speech to Text access. Never put provider keys into browser JavaScript or commit `.env.local`.
 
-Run `node --env-file-if-exists=.env.local server.mjs`, then open http://127.0.0.1:3018. Restart the server after changing environment values. Enter the demo access code in the page if configured; it is held only in the current page. A code is optional for the loopback-only local server and required on Vercel.
+Run `node --env-file-if-exists=.env.local server.mjs`, then open http://127.0.0.1:3018. Restart the server after changing environment values. No access code is required; anyone with the URL can use the app.
 
 ## How it works
 
@@ -35,7 +34,7 @@ Manual input is separate from the live transcript. Failed and cancelled batches 
 - Successful results are cached in server memory for five minutes, up to 100 batches. The original assessment time remains visible. Cache contents include submitted text and research results and disappear on process restart; no database is used.
 - Queued text is held in tab memory by default. Opt-in device saving retains a single discussion in localStorage, including transcript, results, pending work and elapsed time; it does not store audio or access codes. Restore leaves research paused. Delete removes the device copy. JSON export downloads the current discussion. There is no account-based cloud archive. The transcript display shows the latest 6,000 characters; research batches are split without dropping remaining text.
 - Each server instance allows up to 20 paid-route requests per minute per socket address. On proxies, multiple visitors may share a bucket. This is a demo safeguard, not a distributed quota or a spending cap. Set provider budgets before sharing publicly; a wider launch needs shared rate limiting and individual authentication.
-- Vercel fails closed if `DEMO_ACCESS_TOKEN` is missing. Same-origin validation is an additional browser safeguard, not authentication.
+- The app is publicly accessible without a demo code. Same-origin validation and per-instance rate limits remain enabled; they are not authentication or a spending cap.
 - Search excerpts are not full-page verification. The app cannot establish that a source is correct merely because its URL was retrieved. Review linked evidence and uncertainty.
 - Configuration indicators only show whether variables exist. They do not establish valid credentials, credits or provider availability.
 
@@ -45,7 +44,7 @@ Run `node --test`. Tests cover audio conversion, secret-safe errors, transcript 
 
 ## Vercel
 
-Import the repository as an Other-framework project. Serve `public` as configured by `vercel.json`; there is no build command. Add the variables above in the project's environment settings, including `DEMO_ACCESS_TOKEN`, then deploy. Use HTTPS for microphone access. The research handler needs the configured 60-second execution allowance; confirm it is available on your deployment. Smoke-test access-code rejection first, then run a live claim and microphone test within your provider budget. GitHub pushes trigger deployments only after you connect the repository to Vercel; local edits alone do not publish anything.
+Import the repository as an Other-framework project. Serve `public` as configured by `vercel.json`; there is no build command. Add the variables above in the project's environment settings, then deploy. Use HTTPS for microphone access. The research handler needs the configured 60-second execution allowance; confirm it is available on your deployment. Check public access and input validation, then run a live claim and microphone test within your provider budget. GitHub pushes trigger deployments only after you connect the repository to Vercel; local edits alone do not publish anything.
 
 ## Discussion controls
 

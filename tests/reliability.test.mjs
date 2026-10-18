@@ -20,13 +20,10 @@ test('Fabricated source IDs reject the assessment instead of silently dropping c
  assert.equal(validateAssessment({claims:[{...c,source_ids:[]}]},[])[0].verdict,'Unverified');
  assert.throws(()=>validateAssessment({claims:[{...c,claim:{}}]},[]));
 });
-test('Paid endpoints reject missing access codes and fail closed on Vercel without a code',()=>{
- const oldToken=process.env.DEMO_ACCESS_TOKEN,oldVercel=process.env.VERCEL;
- try{
- process.env.DEMO_ACCESS_TOKEN='local-test-code';let res=response();assert.equal(guard({method:'POST',headers:{}},res),false);assert.equal(res.code,401);
- assert.equal(guard({method:'POST',headers:{authorization:'Bearer local-test-code'},socket:{remoteAddress:'auth-test'}},response()),true);
- delete process.env.DEMO_ACCESS_TOKEN;process.env.VERCEL='1';res=response();assert.equal(guard({method:'POST',headers:{}},res),false);assert.equal(res.code,503);
- }finally{if(oldToken===undefined)delete process.env.DEMO_ACCESS_TOKEN;else process.env.DEMO_ACCESS_TOKEN=oldToken;if(oldVercel===undefined)delete process.env.VERCEL;else process.env.VERCEL=oldVercel;}
+test('Public requests work on Vercel even when an old demo token remains configured',()=>{
+ const token=process.env.DEMO_ACCESS_TOKEN,vercel=process.env.VERCEL;
+ try{process.env.DEMO_ACCESS_TOKEN='obsolete-code';process.env.VERCEL='1';assert.equal(guard({method:'POST',headers:{},socket:{remoteAddress:'public-test'}},response()),true);}
+ finally{if(token===undefined)delete process.env.DEMO_ACCESS_TOKEN;else process.env.DEMO_ACCESS_TOKEN=token;if(vercel===undefined)delete process.env.VERCEL;else process.env.VERCEL=vercel;}
 });
 test('Origin mismatch and excessive requests are rejected',()=>{
  let res=response();assert.equal(guard({method:'POST',headers:{origin:'https://other.example',host:'localhost'}},res),false);assert.equal(res.code,403);
